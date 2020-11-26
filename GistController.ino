@@ -1,12 +1,11 @@
 /*
  * GIP Jobbe Geybels 2020-2021
- * Gistcontroller v4.0 op een NODEMCU-board (ESP8266)
+ * Gistcontroller op een NODEMCU-board (ESP8266)
  * 
- * I2C-ADXL345 Gyroscoop
- * I2C-LCD
- * DS18B20 tempsensors
- * Relays: cooling - heating
- * ESP8266: Stuur berichten via GMail
+ * I2C-ADXL345  Gyroscoop
+ * I2C-LCD      LCD-display
+ * DS18B20      tempsensor
+ * Relay        cooling - heating
  * 
  * TODO: stuur warnings als +50min koelen/warmen
  * TODO: stuur bericht als teveel boven/onder temp
