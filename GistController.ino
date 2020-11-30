@@ -1,20 +1,22 @@
 /*
  * GIP Jobbe Geybels 2020-2021
- * Gistcontroller op een NODEMCU-board (ESP8266)
+ * Gistcontroller v4.0 op een NODEMCU-board (ESP8266)
  * 
  * I2C-ADXL345  Gyroscoop
- * I2C-LCD      LCD-display
- * DS18B20      tempsensor
- * Relay        cooling - heating
+ * I2C-LCD      LCD
+ * DS18B20      Tempsensor: Wort
+ * DHT11        Tempsensor: frigo
+ * Relays:      Cooling - Heating
+ * ESP8266      Email naar gist.controller@gmail.com
  * 
  * TODO: stuur warnings als +50min koelen/warmen
  * TODO: stuur bericht als teveel boven/onder temp
- * TODO: millis vervangen door echte datum (wifi=DateTime)
  */
  
 #include <LiquidCrystal_I2C.h>             // Librarys voor LCD I2C
 #include <Adafruit_ADXL345_U.h>            // Librarys ADXL345
 #include <Adafruit_Sensor.h>               // Librarys ADXL345
+#include <DHT.h>                           // Librarys DHT11
 #include <DallasTemperature.h>             // Librarys voor DS18B20
 #include <OneWire.h>                       // Librarys voor DS18B20
 #include <ESP8266WiFi.h>                   // Librarys voor wifi
@@ -26,15 +28,21 @@
 bool    debug                   = true;
 bool    debug_tilt              = false;   // true=serieel tilt-test
 bool    debug_buttons           = false;   // true=serieel button-test
-bool    debug_msg               = false;    // true=serieel msg-test
-bool    debug_wifi              = true;   // true=serieel wifi-test
+bool    debug_msg               = true;    // true=serieel msg-test
+bool    debug_wifi              = false;   // true=serieel wifi-test
 bool    send_msg                = true;   // true=send mails
 String  versie                  = "4.0";   // versienummer
 int     lcdBaud                 = 115200;  // LCD baudrate
 
+int     targettimebetweenmsg      = 300;   // 6 = +/-10sec
+int     timeBetweenMessages       = 0;     // Tijd verstreken sinds laatste message
+boolean mailSend                  = false; // true = mail send
+
 int     currentControllerState    = 1;     // 0=Koelen, 1=Niet-actief, 2=Verwarmen
 int     timeInControllerState     = 0;     // Tijd doorgebracht in een status
-float   currentTemp               = 22.00; // Huidige temperatuur
+float   wortTemp                  = 22.00; // Huidige temperatuur
+float   frigoTemp                 = 0 ;    // temp Frigo
+float   frigoHumi                 = 0 ;    // vochtigheid
 float   targetTemp                = 23.0;  // Te handhaven temperatuur
 float   coolingThreshold          = 1.0;   // Uitstelwaaarde voor koeling start
 float   heatingThreshold          = 1.0;   // Uitstelwaarde voor verwarmen start
@@ -42,10 +50,6 @@ float   maxTemp                   = 0;     // hoogste temperatuur die bereikt we
 float   minTemp                   = 0;     // laagste temperatuur die bereikt werd
 int     maxTimeHeating            = 0;     // langste tijd in status VERWARMEN
 int     maxTimeCooling            = 0;     // langste tijd in status KOELEN
-
-int     targettimebetweenmsg      = 1800;   // 6 = +/-10sec
-int     timeBetweenMessages       = 0;     // Tijd verstreken sinds laatste message
-boolean mailSend                  = false; // true = mail send
 
 boolean wifiConnected             = false; // true = wifi connected
 boolean datetimeSuccess           = false; // ophalen datetime gelukt/niet gelukt
@@ -83,10 +87,11 @@ LiquidCrystal_I2C lcd = LiquidCrystal_I2C(0x27, 16, 2);
 Adafruit_ADXL345_Unified tilter = Adafruit_ADXL345_Unified(12345);
 OneWire oneWire(TEMP_PIN);
 DallasTemperature sensors(&oneWire);
+DHT dht(DHT_PIN, DHT_TYPE);
 
 void setup(void) {
-  // Initialseer LCD en Serieel
-  lcd_serial_Init();
+  // Initialseer LCD,Serieel en Serieel-message
+  lcd_serial_msg_Init();
 
   // Initialiseer componenten
   initSuccess = initComponents();
@@ -97,8 +102,8 @@ void setup(void) {
     }
   }
   
-  // Initialiseer currentTemp/max-minTemp
-  maxTemp = minTemp = getCurrentTemperature();
+  // Initialiseer wortTemp/max-minTemp
+  maxTemp = minTemp = getwortTemperature();
 }
 
 /**
@@ -129,10 +134,22 @@ boolean initComponents() {
   digitalWrite( COOLING_PIN, LOW );        // initieel inactief zetten
   digitalWrite( HEATING_PIN, LOW );        // initieel inactief zetten
   sensors.begin();                         // Start the DS18B20 sensor
+  digitalWrite(DHT_PIN, LOW);              // DHT11 init
+  pinMode(DHT_PIN, OUTPUT);                // DHT11
+  delay(1000);                             // DHT11
+  dht.begin();                             // DHT11
+
+  // test DHT11
+  lcdShowInit("DHT11..........",0);
+  getfrigoTempHumi();
+  if (isnan(frigoHumi) || isnan(frigoTemp)) {
+     lcdShowInit("Error",11);
+     return false;
+  } else {lcdShowInit("gelukt",10);}
 
   // test DS18B20
   lcdShowInit("DS18B20.........",0);
-  if (getCurrentTemperature() == -127) {
+  if (getwortTemperature() == -127) {
      lcdShowInit("Error",11);
      return false;
   } else {lcdShowInit("gelukt",10);}
@@ -176,21 +193,29 @@ boolean initComponents() {
  * Haal de huidige temperatuur op en update MAX- en MIN-Temp
  */
 void updateTemperature() {
-  currentTemp = getCurrentTemperature();
-  if (currentTemp > maxTemp) {
-    maxTemp = currentTemp;
+  wortTemp   = getwortTemperature();
+  getfrigoTempHumi();
+  if (wortTemp > maxTemp) {
+    maxTemp = wortTemp;
   }
-  else if (currentTemp < minTemp) {
-    minTemp = currentTemp;
+  else if (wortTemp < minTemp) {
+    minTemp = wortTemp;
   }
 }
 
 /**
- * Returns de huidige temperatuur
+ * Returns de huidige temperatuur van het wort
  */
-float getCurrentTemperature() {
+float getwortTemperature() {
   sensors.requestTemperatures();            // Opvragen temperatuur (Dallas)
   return sensors.getTempCByIndex(0);        // 0=eersteIC - kan er meerdere hebben
+}
+/**
+ * Returns de huidige temperatuur en vochtigheid in de frigo
+ */
+void getfrigoTempHumi() {
+  frigoTemp = dht.readTemperature();
+  frigoHumi = dht.readHumidity();
 }
 
 /**
@@ -203,7 +228,7 @@ void controlState() {
     // Momenteel aan het KOELEN
     case STATE_COOLING:
       maxTimeCooling++;
-      if (currentTemp < targetTemp + coolingThreshold) {
+      if (wortTemp < targetTemp + coolingThreshold) {
         //stop KOELEN + zet INACTIEF
         currentControllerState = STATE_INACTIVE;
         if (timeInControllerState > maxTimeCooling) {
@@ -215,7 +240,7 @@ void controlState() {
       break;
     // Momenteel INACTIEF = niks aan het doen
     case STATE_INACTIVE:
-      if (currentTemp < targetTemp - heatingThreshold) {
+      if (wortTemp < targetTemp - heatingThreshold) {
         //start VERWARMEN
         currentControllerState = STATE_HEATING;
         timeInControllerState = 0;
@@ -223,7 +248,7 @@ void controlState() {
         countStatHeatTotal++;
         digitalWrite(HEATING_PIN, HIGH);
       }
-      else if (currentTemp > targetTemp + coolingThreshold) {
+      else if (wortTemp > targetTemp + coolingThreshold) {
         //start KOELEN
         currentControllerState = STATE_COOLING;
         timeInControllerState = 0;
@@ -235,7 +260,7 @@ void controlState() {
     // Momenteel aan het VERWARMEN
     case STATE_HEATING:
       maxTimeHeating++;
-      if (currentTemp > targetTemp - heatingThreshold) {
+      if (wortTemp > targetTemp - heatingThreshold) {
         //stop VERWARMEN
         currentControllerState = STATE_INACTIVE;
         if (timeInControllerState > maxTimeHeating) {
@@ -263,8 +288,6 @@ void updateTilted() {
     }
 
     lastTilt = currentTilt;
-    between = millis() - lastmillis_tilt;
-    lastmillis_tilt = millis();
     if (debug_tilt) {
       serialTilted();
       }
@@ -602,7 +625,7 @@ byte ReadButtons()
 /*
  * Initialiseer LCD 
  */
-void lcd_serial_Init() {
+void lcd_serial_msg_Init() {
   lcd.init();
   lcd.backlight();
   lcd.setCursor(0,0);
@@ -617,6 +640,12 @@ void lcd_serial_Init() {
       Serial.println("Initialisatie Gist-controller");
   }
   delay(1000);
+
+  if (debug_msg) {
+    Serial.print("startdatum;meetpunt;verstreken;status;tijdinstatus;");
+    Serial.print("worttemp;frigotemp;vochtigheid;coolingsinframe;");
+    Serial.println("heatingsinframe;tiltsinframe;tijdtussentilts");
+  }
 }
 
 /*
@@ -667,6 +696,9 @@ void displayState()  {
     case DISPLAY_SUMMARY:
       displaySummary();
       break;
+    case DISPLAY_FRIDGE:
+      displayFridge();
+      break;
     case DISPLAY_TEMP_HISTORY_MIN:
       displayMinHistory();
       break;
@@ -712,9 +744,9 @@ void displayState()  {
 void displaySummary() {
   lcd.clear();
   lcd.setCursor(0,0);
-  lcd.print("Temp");
+  lcd.print("WortTemp");
   lcd.setCursor(9,0);
-  lcd.print(currentTemp);
+  lcd.print(wortTemp);
   lcd.setCursor(14,0);
   lcd.print((char)223);
   lcd.setCursor(15,0);
@@ -739,6 +771,16 @@ void displaySummary() {
       lcd.print("^");
       break;
   }
+}
+
+void displayFridge() {
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Frigo Temp/Humi");
+  lcd.setCursor(0,1);
+  lcd.print(frigoTemp);
+  lcd.setCursor(7,1);
+  lcd.print(frigoHumi);
 }
 
 /**
@@ -896,15 +938,12 @@ String fillMessage() {
   String bmsg       = "";
 
   bmsg = bmsg + DateFormatter::format("Startdatum: %d/%m/%Y %H:%M:%S", startDateInt);
-  bmsg = bmsg + DateFormatter::format("Meetpunt  : %d/%m/%Y %H:%M:%S", DateTime.now());
-  bmsg = bmsg + "<p>";
-  
-  bmsg = bmsg + "Verstreken tijd  : " + showTime((millis() - StartMillis)/1000,true) + "</BR>";
-  bmsg = bmsg + "Aantal tilts     : " + countTilts + "<p>";
-  bmsg = bmsg + "Totaal tilts     : " + countTiltsTotal + "<p>";
-  bmsg = bmsg + "Laatste tilt-tijd: " + showTime(between/1000,true) + "<p>";
-  bmsg = bmsg + "<p>";
+  bmsg = bmsg + DateFormatter::format(" Meetpunt  : %d/%m/%Y %H:%M:%S", DateTime.now());
+  bmsg += "<BR>";
+  bmsg = bmsg + "Verstreken tijd  : " + showTime((millis() - StartMillis)/1000,true);
+  bmsg += "<p>";
             
+  bmsg += "Momenteel ";
   switch ( currentControllerState ) {
     case STATE_COOLING:
       bmsg = bmsg + "Koelen   : ";
@@ -916,66 +955,83 @@ String fillMessage() {
       bmsg = bmsg + "Verwarmen: ";
       break;
   }
-  bmsg = bmsg + showTime(timeInControllerState,false) + "<p>";
-  bmsg = bmsg + "MaxTemp: " + maxTemp + "<p>";
-  bmsg = bmsg + "MinTemp: " + minTemp + "<p>";
+  bmsg = bmsg + showTime(timeInControllerState,false) + "<BR>";
+  bmsg = bmsg + "Huidige temperatuur: " + wortTemp;
+  bmsg = bmsg + " Frigo temperatuur: " + frigoTemp;
+  bmsg = bmsg + " vochtigheid: " + frigoHumi;
+  bmsg += "<p>";
+ 
+  bmsg = bmsg + "MaxTemp: " + maxTemp + "<BR>";
+  bmsg = bmsg + "MinTemp: " + minTemp + "<BR>";
   bmsg = bmsg + "MaxTimeHeating: ";
-  bmsg = bmsg + showTime(maxTimeHeating,false) + "<p>";
+  bmsg = bmsg + showTime(maxTimeHeating,false) + "<BR>";
   bmsg = bmsg + "MaxTimeCooling: ";
-  bmsg = bmsg + showTime(maxTimeCooling,false) + "<p>";
-  bmsg = bmsg + "<p>";
+  bmsg = bmsg + showTime(maxTimeCooling,false);
+  bmsg += "<p>";
 
-  bmsg = bmsg + "Aantal Coolings: " + countStatCool + "<p>";
-  bmsg = bmsg + "         Totaal: " + countStatCoolTotal + "<p>";
-  bmsg = bmsg + "Aantal Heatings: " + countStatHeat + "<p>";
-  bmsg = bmsg + "         Totaal: " + countStatHeatTotal + "<p>";  
+  bmsg = bmsg + "Aantal Coolings: " + countStatCool;
+  bmsg = bmsg + " Totaal: " + countStatCoolTotal + "<BR>";
+  bmsg = bmsg + "Aantal Heatings: " + countStatHeat;
+  bmsg = bmsg + " Totaal: " + countStatHeatTotal;
+  bmsg += "<p>";  
 
+  bmsg = bmsg + "Aantal tilts: " + countTilts;
+  bmsg = bmsg + " Totaal: " + countTiltsTotal + "<BR>";
+  bmsg = bmsg + "Laatste tilt-tijd: " + showTime(between/1000,true);
+  bmsg += "<p>";
+  
   return bmsg;
 }
 
 void serialMsg() {
-  Serial.println(DateFormatter::format("Startdatum: %d/%m/%Y %H:%M:%S", startDateInt));
-  Serial.println(DateFormatter::format("Meetpunt  : %d/%m/%Y %H:%M:%S", DateTime.now()));
-  //Serial.println(showTime(DateTime.now()-startDateInt,true));
-  
-  Serial.print("Verstreken tijd:");
-  Serial.println(showTime((millis() - StartMillis)/1000,true));
-  
-  Serial.printf("Tilts: %i Totaal: %i\n", (countTilts), (countTiltsTotal));
-  
-  Serial.print("Laatste tilt-tijd: ");
-  Serial.println(showTime(between/1000,true));
-  
+  // startdatum
+  Serial.print(DateFormatter::format("%d/%m/%Y %H:%M:%S", startDateInt));
+  Serial.print(";");
+  // meetpunt
+  Serial.print(DateFormatter::format("%d/%m/%Y %H:%M:%S", DateTime.now()));
+  Serial.print(";");
+  // verstreken tijd
+  Serial.print(showTime((millis() - StartMillis)/1000,true));
+  Serial.print(";");
+  // status op meetpunt
   switch ( currentControllerState ) {
     case STATE_COOLING:
-      Serial.print("Koelen: ");
+      Serial.print("Koelen");
       break;
     case STATE_INACTIVE:
-      Serial.print("Inactief: ");
+      Serial.print("Inactief");
       break;
     case STATE_HEATING:
-      Serial.print("Verwarmen: ");
+      Serial.print("Verwarmen");
       break;
-      }
-  Serial.println(showTime(timeInControllerState,false));
+  }
+  Serial.print(";");
+  // tijd in huidige status
+  Serial.print(showTime(timeInControllerState,false));
+  Serial.print(";");
+  // huidige worttemp
+  Serial.print(wortTemp);
+  Serial.print(";");
+  // frigo temp
+  Serial.print(frigoTemp);
+  Serial.print(";");
+  // vochtigheid
+  Serial.print(frigoHumi);
+  Serial.print(";");
 
-  Serial.print("MaxTemp: ");
-  Serial.print(maxTemp);
-  Serial.print(" MinTemp: ");
-  Serial.println(minTemp);
-  Serial.print("MaxTimeHeating: ");
-  Serial.println(showTime(maxTimeHeating,false));
-  Serial.print("MaxTimeCooling: ");
-  Serial.println(showTime(maxTimeCooling,false));
-      
-  Serial.print("Aantal Coolings: ");
+  // coolings in timeframe
   Serial.print(countStatCool);
-  Serial.print("  Totaal:");
-  Serial.println(countStatCoolTotal);
-  Serial.print("Aantal Heatings: ");
+  Serial.print(";");
+  // heatings in timeframe
   Serial.print(countStatHeat);
-  Serial.print("  Totaal:");
-  Serial.println(countStatHeatTotal);
+  Serial.print(";");
+
+  // tilts (naar 0) in timeframe
+  Serial.print(countTilts);
+  Serial.print(";");
+  // tijd tussen 0-1 laatste tilt
+  Serial.print(showTime(between/1000,true));
+
   Serial.println("");
 }
 
