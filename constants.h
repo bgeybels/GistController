@@ -13,15 +13,16 @@ const float MAXIMUM_TARGET        = 23.0;  // Maximum toegelaten targetTemp
 const float TEMP_THRESHOLD_INCR   = 0.25;  // Tel bij threashold UP/DOWN
 const float MINIMUM_THREASHOLD    = 0.1;   // Minimum toegelaten MIN-THREASH
 const float MAXIMUM_THREASHOLD    = 5.0;   // Maximum toegelaten MAX-THREASH
-const int   DISPLAY_TIMER_INCR    = 10;    // tel bij Displaytimers
-const int   REDIRECT_TIMEOUT      = 1000;  // Back to hoofdscherm *5=Timeout
-const int   BETWEEN_MSG_INCR      = 5;     // tel bij targettimebetweenmsg u/d
+const int   REDIRECT_TIMEOUT      = 5000;  // Back to hoofdscherm *5=Timeout (millis)
+const int   BETWEEN_MSG_INCR      = 10;    // tel bij targettimebetweenmsg (minuten)
 
 // Pins in gebruik
 const int   BUTTON_ADC_PIN        = A0;    // ButtonPIN (analoog 5 buttons)
-const int   COOLING_PIN           = 12;    // GPIO5 Koeler (led-blauw of 220V)
-const int   HEATING_PIN           = 14;    // GPIO6 Verwarming (led-rood of 220V)
-const int   TEMP_PIN              = 2;     // GPIO4 Temperatuursensor DSB1820
+const int   COOLING_PIN           = 12;    // GPIO12 (D6) Koeler (led-blauw of 220V)
+const int   HEATING_PIN           = 14;    // GPIO14 (D5) Verwarming (led-rood of 220V)
+const int   TEMP_PIN              = 2;     // GPIO2  (D4) Temperatuursensor DSB1820
+const int   DHT_PIN               = 13;    // GPIO13 (D7)Temperatuur en vochtigheid DHT11 
+#define DHT_TYPE  DHT11 
 
 // ADC waardes voor de 5 knoppen op A0 (regeling met weerstanden)
 // Zet debug_buttons op true en bekijk de seriële monitor
@@ -49,16 +50,17 @@ const int   STATE_HEATING         = 2;
 
 // LCDdisplay waardes
 const int   DISPLAY_SUMMARY           = 0;
-const int   DISPLAY_STATUS            = 1;
-const int   DISPLAY_STATUS_MAX_HEAT   = 2;
-const int   DISPLAY_STATUS_MAX_COOL   = 3;
-const int   DISPLAY_TEMP_HISTORY_MIN  = 4;
-const int   DISPLAY_TEMP_HISTORY_MAX  = 5;
-const int   DISPLAY_SET_MAX_TEMP      = 6;
-const int   DISPLAY_SET_MIN_TEMP      = 7;
-const int   DISPLAY_SET_TARGET        = 8;
-const int   DISPLAY_SET_MSG_TIME      = 9;
-const int   NO_OF_LCD_STATES          = 10;
+const int   DISPLAY_FRIDGE            = 1;
+const int   DISPLAY_STATUS            = 2;
+const int   DISPLAY_STATUS_MAX_HEAT   = 3;
+const int   DISPLAY_STATUS_MAX_COOL   = 4;
+const int   DISPLAY_TEMP_HISTORY_MIN  = 5;
+const int   DISPLAY_TEMP_HISTORY_MAX  = 6;
+const int   DISPLAY_SET_MAX_TEMP      = 7;
+const int   DISPLAY_SET_MIN_TEMP      = 8;
+const int   DISPLAY_SET_TARGET        = 9;
+const int   DISPLAY_SET_MSG_TIME      = 10;
+const int   NO_OF_LCD_STATES          = 11;
 
 // Omzetten millis/seconden naar leesbare vorm
 #define SECS_PER_MIN  (60UL)

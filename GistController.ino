@@ -25,18 +25,18 @@
 #include "Base64.h"                        // base-64 voor wifi-paswoord
 #include "constants.h"                     // Constante parameters
 
-bool    debug                   = true;
-bool    debug_tilt              = false;   // true=serieel tilt-test
-bool    debug_buttons           = false;   // true=serieel button-test
-bool    debug_msg               = true;    // true=serieel msg-test
-bool    debug_wifi              = false;   // true=serieel wifi-test
-bool    send_msg                = true;    // true=send mails
-String  versie                  = "4.0";   // versienummer
-int     lcdBaud                 = 115200;  // LCD baudrate
+bool    debug                     = true;
+bool    debug_tilt                = false;   // true=serieel tilt-test
+bool    debug_buttons             = false;   // true=serieel button-test
+bool    debug_msg                 = true;    // true=serieel msg-test
+bool    debug_wifi                = false;   // true=serieel wifi-test
+bool    send_msg                  = true;    // true=send mails
+String  versie                    = "4.0";   // versienummer
+int     lcdBaud                   = 115200;  // LCD baudrate
 
-int     targettimebetweenmsg      = 60000; // millis: 1000=1sec
-int     timeBetweenMessages       = 0;     // millis: Tijd verstreken sinds laatste message
-int     currentMillis             = 0;     // 
+int     millisMessage             = 60000; // millis: 1000=1sec
+int     millisBetweenMessages     = 0;     // millis: Tijd verstreken
+int     currentMillis             = 0;     // millis op moment van de test = Nu!
 boolean mailSend                  = false; // true = mail send
 
 int     currentControllerState    = 1;     // 0=Koelen, 1=Niet-actief, 2=Verwarmen
@@ -49,8 +49,8 @@ float   coolingThreshold          = 1.0;   // Uitstelwaaarde voor koeling start
 float   heatingThreshold          = 1.0;   // Uitstelwaarde voor verwarmen start
 float   maxTemp                   = 0;     // hoogste temperatuur die bereikt werd
 float   minTemp                   = 0;     // laagste temperatuur die bereikt werd
-int     maxTimeHeating            = 0;     // langste tijd in status VERWARMEN (millis)
-int     maxTimeCooling            = 0;     // langste tijd in status KOELEN (millis)
+int     maxTimeHeating            = 0;     // langste tijd status VERWARMEN (millis)
+int     maxTimeCooling            = 0;     // langste tijd status KOELEN (millis)
 
 boolean wifiConnected             = false; // true = wifi connected
 boolean datetimeSuccess           = false; // ophalen datetime gelukt/niet gelukt
@@ -59,8 +59,8 @@ String  initMsg                   = "";
 
 boolean buttonPressed             = false; // werd er op een knop gedrukt?
 int     currentLCDState           = 0;     // Welk LCD momenteel actief: 0 tem ... 
-int     timeInLCDState            = 0;     // > REDIRECT_TIMEOUT = LCD naar 0
-int     backlightTimeout          = 0;     // > REDIRECT_TIMEOUTx5 = LCD uit 
+int     timeInLCDState            = 0;     // millis in een LCDstaat
+int     backlightTimeout          = 0;     // millis LCD uit 
 boolean isBacklightActive         = true;  // LCD momenteel actief?
 
 float   X_out                     = 0;     // tilt-x-as
@@ -71,11 +71,11 @@ int     lastTilt                  = 0;     // de vorige tiltwaarde
 long    lastmillis_tilt           = 0;     // millis van de laaste tilt
 int     between                   = 0;     // Tijd tussen twee tilts
 
-int     countTilts                = 0;     // Aantal tilts in targettimebetweenmsg
+int     countTilts                = 0;     // Aantal tilts in millisMessage
 int     countTiltsTotal           = 0;     // Aantal tilts sinds start
-int     countStatHeat             = 0;     // Aantal HEAT binnen targettimebetweenmsg
+int     countStatHeat             = 0;     // Aantal HEAT binnen millisMessage
 int     countStatHeatTotal        = 0;     // Aantal Heat sinds start
-int     countStatCool             = 0;     // Aantal COOL binnen targettimebetweenmsg
+int     countStatCool             = 0;     // Aantal COOL binnen millisMessage
 int     countStatCoolTotal        = 0;     // Aantal COOL sinds start
 
 // !!! na 50dagen gaat millis terug op 0 (voldoende voor de gisting)
@@ -185,6 +185,8 @@ boolean initComponents() {
     // Bewaar het startpunt
     startDateInt = DateTime.now();
     StartMillis = millis();
+    backlightTimeout = StartMillis;
+    millisBetweenMessages = startMillis;
     }  
 
   return true;
@@ -316,8 +318,8 @@ void getTilt() {
  */
 void sendMessage() {
   currentMillis = millis();
-  if ( currentMillis - timeBetweenMessages > targettimebetweenmsg) {
-    timeBetweenMessages = currentMillis;
+  if ( currentMillis - millisBetweenMessages > millisMessage) {
+    millisBetweenMessages = currentMillis;
     if (debug_msg) {serialMsg();}
 
     if (send_msg) {
@@ -408,20 +410,19 @@ boolean setupDateTime(int loops) {
  * Gebruik knoppen, LCD-displaymodus aanpassen en LCD verversen
  */
 void controlDisplayState() {
+  currentMillis = millis();
   
   // Zet LCD uit na verstrijken timeout
-  checkBacklightTimeout();
+  checkBacklightTimeout(currentMillis);
   
-  // bewaar tijd in deze LCD-status
-  timeInLCDState += DISPLAY_TIMER_INCR;
   // welke knop is er gedrukt?
   byte whichButtonPressed = ReadButtons();
 
   // Geen knop gedrukt EN momenteel niet in SUMMARY-status 
   if ( !whichButtonPressed && currentLCDState != DISPLAY_SUMMARY) {
     // Indien je te lang in huidige LCD-status zit = Terug naar SUMMARY-status
-    if ( timeInLCDState >= REDIRECT_TIMEOUT ) {
-      timeInLCDState = 0;
+    if ( currentMillis - timeInLCDState >= REDIRECT_TIMEOUT ) {
+      timeInLCDState = currentMillis;
       currentLCDState = DISPLAY_SUMMARY;
       displayState();
     }
@@ -430,14 +431,14 @@ void controlDisplayState() {
   // Wissel van LCDstatus met knoppen LINKS/RECHTS
   else if ( whichButtonPressed == BUTTON_RIGHT || 
             whichButtonPressed == BUTTON_LEFT ) {
-    handleLeftRight( whichButtonPressed );
+    handleLeftRight( whichButtonPressed, currentMillis );
     enableBacklight();
     displayState();
   }
   // Knoppen UP/DOWN = wijzig parameters (welke = afhankelijk van de LCD-status)
   else if ( whichButtonPressed == BUTTON_UP || 
             whichButtonPressed == BUTTON_DOWN ) {
-    handleUpDown( whichButtonPressed );
+    handleUpDown( whichButtonPressed, currentMillis );
     enableBacklight();
     displayState(); 
   }
@@ -449,9 +450,9 @@ void controlDisplayState() {
 /**
  * Knop = LINKS-RECHTS = aanpassen van de LCD-status
  */
-void handleLeftRight( int whichButtonPressed ) {
+void handleLeftRight( int whichButtonPressed, int mtime ) {
     // reset de tijd in deze LCD-status
-    timeInLCDState = 0;
+    timeInLCDState = mtime;
 
     if ( whichButtonPressed == BUTTON_RIGHT ) {
       currentLCDState++;
@@ -466,7 +467,7 @@ void handleLeftRight( int whichButtonPressed ) {
 /**
  * Knop = UP/DOWN = Wijzig parameters, afhankelijk van de huidige LCD-status
  */
-void handleUpDown( int whichButtonPressed ) {
+void handleUpDown( int whichButtonPressed, int mtime ) {
 
    switch ( currentLCDState ) {
     case DISPLAY_SET_MAX_TEMP:
@@ -475,7 +476,7 @@ void handleUpDown( int whichButtonPressed ) {
       // hoe hoger hoe langer er gewacht wordt met koelen
       if ( whichButtonPressed == BUTTON_UP ) {
         // reset LCD-status-timer
-        timeInLCDState = 0;
+        timeInLCDState = mtime;
         // de nieuwe waarde mag niet hoger zijn dan MAXIMUM_THREASHOLD
         if ( coolingThreshold < MAXIMUM_THREASHOLD ) {
           coolingThreshold += TEMP_THRESHOLD_INCR;
@@ -483,7 +484,7 @@ void handleUpDown( int whichButtonPressed ) {
       }
       else if ( whichButtonPressed == BUTTON_DOWN ) {
         // reset LCD-status-timer
-        timeInLCDState = 0;
+        timeInLCDState = mtime;
         // de nieuwe waarde mag niet lager zijn dan MINIMUM_THREASHOLD
         if ( coolingThreshold > MINIMUM_THREASHOLD ) {
           coolingThreshold -= TEMP_THRESHOLD_INCR; 
@@ -496,7 +497,7 @@ void handleUpDown( int whichButtonPressed ) {
       // hoe hoger hoe langer er gewacht wordt met verwarmen
       if ( whichButtonPressed == BUTTON_UP ) {
         // reset LCD-status-timer
-        timeInLCDState = 0;
+        timeInLCDState = mtime;
 
         // de nieuwe waarde mag niet hoger zijn dan MAXIMUM_THREASHOLD
         if ( heatingThreshold < MAXIMUM_THREASHOLD ) {
@@ -505,7 +506,7 @@ void handleUpDown( int whichButtonPressed ) {
       }
       else if ( whichButtonPressed == BUTTON_DOWN ) {
         // reset LCD-status-timer
-        timeInLCDState = 0;
+        timeInLCDState = mtime;
         // de nieuwe waarde mag niet lager zijn dan MINIMUM_THREASHOLD
         if ( heatingThreshold > MINIMUM_THREASHOLD ) {
           heatingThreshold -= TEMP_THRESHOLD_INCR; 
@@ -516,20 +517,21 @@ void handleUpDown( int whichButtonPressed ) {
       // Verhoog/verlaag de tijd tussen boodschappen
       if ( whichButtonPressed == BUTTON_UP ) {
         // reset LCD-status-timer
-        timeInLCDState = 0;
-        targettimebetweenmsg += BETWEEN_MSG_INCR; 
+        timeInLCDState = mtime;
+        //BETWEEN_MSG_INCR = in minuten = 1000 * 60 * BETWEEN_MSG_INCR
+        millisMessage += BETWEEN_MSG_INCR*60000; 
       }
       else if ( whichButtonPressed == BUTTON_DOWN ) {
         // reset LCD-status-timer
-        timeInLCDState = 0;
-        targettimebetweenmsg -= BETWEEN_MSG_INCR; 
+        timeInLCDState = mtime;
+        millisMessage -= BETWEEN_MSG_INCR*60000; 
       }
       break;  
     case DISPLAY_SET_TARGET:
       // Verhoog/verlaag de gewenste temperatuur
       if ( whichButtonPressed == BUTTON_UP ) {
         // reset LCD-status-timer
-        timeInLCDState = 0;
+        timeInLCDState = mtime;
         // mag niet hoger gezet worden dan MAXIMUM_TARGET
         if ( targetTemp < MAXIMUM_TARGET ) {
           targetTemp += TEMP_INCR; 
@@ -537,7 +539,7 @@ void handleUpDown( int whichButtonPressed ) {
       }
       else if ( whichButtonPressed == BUTTON_DOWN ) {
         // reset LCD-status-timer
-        timeInLCDState = 0;
+        timeInLCDState = mtime;
         // mag niet lager gezet worden dan MINIMUM_TARGET
         if ( targetTemp > MINIMUM_TARGET ) {
         targetTemp -= TEMP_INCR; 
@@ -659,9 +661,9 @@ void lcdShowInit(String initmsg, int pos) {
 /**
  * Zet LCD-backlight uit als timeout verstreken (REDIRECT_TIMEOUT * 5)
  */
-void checkBacklightTimeout() {
+void checkBacklightTimeout(int mtime) {
   if (   isBacklightActive 
-      && (backlightTimeout += DISPLAY_TIMER_INCR) > (REDIRECT_TIMEOUT * 5) ) {
+      && (mtime - backlightTimeout) > (REDIRECT_TIMEOUT * 5) ) {
     disableBacklight();
   }
 }
@@ -669,22 +671,22 @@ void checkBacklightTimeout() {
 /**
  * disable LCDscherm
  */
-void disableBacklight() {
+void disableBacklight(int mtime) {
   lcd.noBacklight();
   lcd.noDisplay();
   isBacklightActive = false;
-  backlightTimeout = 0;
+  backlightTimeout = mtime;
 }
 
 /**
  * enable LCDscherm
  */
-void enableBacklight() {
+void enableBacklight(int mtime) {
   lcd.display();
   lcd.backlight();
   
   isBacklightActive = true;
-  backlightTimeout = 0;
+  backlightTimeout = mtime;
 }
 
 /**
@@ -841,7 +843,7 @@ void displaysetmsgtime() {
   lcd.setCursor(0,0);
   lcd.print("Boodschap tijd: ");
   lcd.setCursor(0,1);
-  lcd.print(targettimebetweenmsg);
+  lcd.print(millisMessage/60000);
   lcd.setCursor(7,1);
   lcd.print("[up/down]");
 }
