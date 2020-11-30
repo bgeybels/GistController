@@ -79,8 +79,8 @@ int     countStatCool             = 0;     // Aantal COOL binnen millisMessage
 int     countStatCoolTotal        = 0;     // Aantal COOL sinds start
 
 // !!! na 50dagen gaat millis terug op 0 (voldoende voor de gisting)
-long    StartMillis               = 0;     // Bewaar startpunt programma
-long    PastMillis                = 0;     // Verstreken tijd sinds StartMillis
+long    startMillis               = 0;     // Bewaar startpunt programma
+long    PastMillis                = 0;     // Verstreken tijd sinds startMillis
 time_t  startDateInt              = 0;     // Startdatum/uur (DateTime)
 
 // Initialiseer librarys 
@@ -184,8 +184,8 @@ boolean initComponents() {
     lcdShowInit("gelukt",10);
     // Bewaar het startpunt
     startDateInt = DateTime.now();
-    StartMillis = millis();
-    backlightTimeout = StartMillis;
+    startMillis = millis();
+    backlightTimeout = startMillis;
     millisBetweenMessages = startMillis;
     }  
 
@@ -432,18 +432,18 @@ void controlDisplayState() {
   else if ( whichButtonPressed == BUTTON_RIGHT || 
             whichButtonPressed == BUTTON_LEFT ) {
     handleLeftRight( whichButtonPressed, currentMillis );
-    enableBacklight();
+    enableBacklight(currentMillis);
     displayState();
   }
   // Knoppen UP/DOWN = wijzig parameters (welke = afhankelijk van de LCD-status)
   else if ( whichButtonPressed == BUTTON_UP || 
             whichButtonPressed == BUTTON_DOWN ) {
     handleUpDown( whichButtonPressed, currentMillis );
-    enableBacklight();
+    enableBacklight(currentMillis);
     displayState(); 
   }
   else if ( whichButtonPressed == BUTTON_SELECT ) {
-    handleSelect();
+    handleSelect(currentMillis);
   }
 }
 
@@ -552,12 +552,12 @@ void handleUpDown( int whichButtonPressed, int mtime ) {
 /*
  * Knop = SELECT = LCDscherm aan/uit
  */
-void handleSelect() {
+void handleSelect(int mtime) {
   if (isBacklightActive) {
-    disableBacklight();
+    disableBacklight(mtime);
   }
   else {
-    enableBacklight();
+    enableBacklight(mtime);
   }
 }
 
@@ -664,7 +664,7 @@ void lcdShowInit(String initmsg, int pos) {
 void checkBacklightTimeout(int mtime) {
   if (   isBacklightActive 
       && (mtime - backlightTimeout) > (REDIRECT_TIMEOUT * 5) ) {
-    disableBacklight();
+    disableBacklight(mtime);
   }
 }
 
@@ -941,7 +941,7 @@ String fillMessage() {
   bmsg = bmsg + DateFormatter::format("Startdatum: %d/%m/%Y %H:%M:%S", startDateInt);
   bmsg = bmsg + DateFormatter::format(" Meetpunt  : %d/%m/%Y %H:%M:%S", DateTime.now());
   bmsg += "<BR>";
-  bmsg = bmsg + "Verstreken tijd  : " + showTime((millis() - StartMillis)/1000,true);
+  bmsg = bmsg + "Verstreken tijd  : " + showTime((millis() - startMillis)/1000,true);
   bmsg += "<p>";
             
   bmsg += "Momenteel ";
@@ -992,7 +992,7 @@ void serialMsg() {
   Serial.print(DateFormatter::format("%d/%m/%Y %H:%M:%S", DateTime.now()));
   Serial.print(";");
   // verstreken tijd
-  Serial.print(showTime((millis() - StartMillis)/1000,true));
+  Serial.print(showTime((millis() - startMillis)/1000,true));
   Serial.print(";");
   // status op meetpunt
   switch ( currentControllerState ) {
