@@ -30,16 +30,17 @@ bool    debug_tilt              = false;   // true=serieel tilt-test
 bool    debug_buttons           = false;   // true=serieel button-test
 bool    debug_msg               = true;    // true=serieel msg-test
 bool    debug_wifi              = false;   // true=serieel wifi-test
-bool    send_msg                = true;   // true=send mails
+bool    send_msg                = true;    // true=send mails
 String  versie                  = "4.0";   // versienummer
 int     lcdBaud                 = 115200;  // LCD baudrate
 
-int     targettimebetweenmsg      = 300;   // 6 = +/-10sec
-int     timeBetweenMessages       = 0;     // Tijd verstreken sinds laatste message
+int     targettimebetweenmsg      = 60000; // millis: 1000=1sec
+int     timeBetweenMessages       = 0;     // millis: Tijd verstreken sinds laatste message
+int     currentMillis             = 0;     // 
 boolean mailSend                  = false; // true = mail send
 
 int     currentControllerState    = 1;     // 0=Koelen, 1=Niet-actief, 2=Verwarmen
-int     timeInControllerState     = 0;     // Tijd doorgebracht in een status
+int     timeInControllerState     = 0;     // Tijd doorgebracht in een status (millis)
 float   wortTemp                  = 22.00; // Huidige temperatuur
 float   frigoTemp                 = 0 ;    // temp Frigo
 float   frigoHumi                 = 0 ;    // vochtigheid
@@ -48,8 +49,8 @@ float   coolingThreshold          = 1.0;   // Uitstelwaaarde voor koeling start
 float   heatingThreshold          = 1.0;   // Uitstelwaarde voor verwarmen start
 float   maxTemp                   = 0;     // hoogste temperatuur die bereikt werd
 float   minTemp                   = 0;     // laagste temperatuur die bereikt werd
-int     maxTimeHeating            = 0;     // langste tijd in status VERWARMEN
-int     maxTimeCooling            = 0;     // langste tijd in status KOELEN
+int     maxTimeHeating            = 0;     // langste tijd in status VERWARMEN (millis)
+int     maxTimeCooling            = 0;     // langste tijd in status KOELEN (millis)
 
 boolean wifiConnected             = false; // true = wifi connected
 boolean datetimeSuccess           = false; // ophalen datetime gelukt/niet gelukt
@@ -223,18 +224,17 @@ void getfrigoTempHumi() {
  * (HEATING) <=> (INACTIVE) <=> (COOLING)
  */
 void controlState() {
-  timeInControllerState++; 
+  currentMillis = millis();
   switch ( currentControllerState ) {
     // Momenteel aan het KOELEN
     case STATE_COOLING:
-      maxTimeCooling++;
       if (wortTemp < targetTemp + coolingThreshold) {
         //stop KOELEN + zet INACTIEF
         currentControllerState = STATE_INACTIVE;
-        if (timeInControllerState > maxTimeCooling) {
-          maxTimeCooling = timeInControllerState;
+        if (currentMillis - timeInControllerState > maxTimeCooling) {
+          maxTimeCooling = currentMillis - timeInControllerState;
         }
-        timeInControllerState = 0;
+        timeInControllerState = currentMillis;
         digitalWrite(COOLING_PIN, LOW);
       }
       break;
@@ -243,7 +243,7 @@ void controlState() {
       if (wortTemp < targetTemp - heatingThreshold) {
         //start VERWARMEN
         currentControllerState = STATE_HEATING;
-        timeInControllerState = 0;
+        timeInControllerState = currentMillis;
         countStatHeat++;
         countStatHeatTotal++;
         digitalWrite(HEATING_PIN, HIGH);
@@ -251,7 +251,7 @@ void controlState() {
       else if (wortTemp > targetTemp + coolingThreshold) {
         //start KOELEN
         currentControllerState = STATE_COOLING;
-        timeInControllerState = 0;
+        timeInControllerState = currentMillis;
         countStatCool++;
         countStatCoolTotal++;
         digitalWrite(COOLING_PIN, HIGH);
@@ -259,14 +259,13 @@ void controlState() {
       break;
     // Momenteel aan het VERWARMEN
     case STATE_HEATING:
-      maxTimeHeating++;
       if (wortTemp > targetTemp - heatingThreshold) {
         //stop VERWARMEN
         currentControllerState = STATE_INACTIVE;
-        if (timeInControllerState > maxTimeHeating) {
-          maxTimeHeating = timeInControllerState;
+        if (currentMillis - timeInControllerState > maxTimeHeating) {
+          maxTimeHeating = currentMillis - timeInControllerState;
         }
-        timeInControllerState = 0;
+        timeInControllerState = currentMillis;
         digitalWrite(HEATING_PIN, LOW);
       } // if
       break;
@@ -316,9 +315,9 @@ void getTilt() {
  * Stuur het bericht met tilt- en statusinfo als tijd om is 
  */
 void sendMessage() {
-  timeBetweenMessages++;                     // tijd verstreken sinds laatste msg
-  if (timeBetweenMessages > targettimebetweenmsg) {
-    timeBetweenMessages = 1;
+  currentMillis = millis();
+  if ( currentMillis - timeBetweenMessages > targettimebetweenmsg) {
+    timeBetweenMessages = currentMillis;
     if (debug_msg) {serialMsg();}
 
     if (send_msg) {
@@ -865,7 +864,7 @@ void displayStatus() {
       break;
   }
   lcd.setCursor(0,1);
-  lcd.print(showTime(timeInControllerState,false));
+  lcd.print(showTime(timeInControllerState/1000,false));
 }
 
 /**
@@ -876,14 +875,14 @@ void displayStatusmaxcool() {
   lcd.setCursor(0,0);
   lcd.print("MaxKoelen:");
   lcd.setCursor(0,1);
-  lcd.print(showTime(maxTimeCooling,false));
+  lcd.print(showTime(maxTimeCooling/1000,false));
 }
 void displayStatusmaxheat() {
   lcd.clear();
   lcd.setCursor(0,0);
   lcd.print("MaxWarmen:");
   lcd.setCursor(0,1);
-  lcd.print(showTime(maxTimeHeating,false));
+  lcd.print(showTime(maxTimeHeating/1000,false));
 }
 /**
  * display target temp
@@ -955,7 +954,7 @@ String fillMessage() {
       bmsg = bmsg + "Verwarmen: ";
       break;
   }
-  bmsg = bmsg + showTime(timeInControllerState,false) + "<BR>";
+  bmsg = bmsg + showTime(timeInControllerState/1000,false) + "<BR>";
   bmsg = bmsg + "Huidige temperatuur: " + wortTemp;
   bmsg = bmsg + " Frigo temperatuur: " + frigoTemp;
   bmsg = bmsg + " vochtigheid: " + frigoHumi;
@@ -964,9 +963,9 @@ String fillMessage() {
   bmsg = bmsg + "MaxTemp: " + maxTemp + "<BR>";
   bmsg = bmsg + "MinTemp: " + minTemp + "<BR>";
   bmsg = bmsg + "MaxTimeHeating: ";
-  bmsg = bmsg + showTime(maxTimeHeating,false) + "<BR>";
+  bmsg = bmsg + showTime(maxTimeHeating/1000,false) + "<BR>";
   bmsg = bmsg + "MaxTimeCooling: ";
-  bmsg = bmsg + showTime(maxTimeCooling,false);
+  bmsg = bmsg + showTime(maxTimeCooling/1000,false);
   bmsg += "<p>";
 
   bmsg = bmsg + "Aantal Coolings: " + countStatCool;
@@ -1007,7 +1006,7 @@ void serialMsg() {
   }
   Serial.print(";");
   // tijd in huidige status
-  Serial.print(showTime(timeInControllerState,false));
+  Serial.print(showTime(timeInControllerState/1000,false));
   Serial.print(";");
   // huidige worttemp
   Serial.print(wortTemp);
