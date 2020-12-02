@@ -9,7 +9,6 @@
  * Relays:      Cooling - Heating
  * ESP8266      Email naar gist.controller@gmail.com
  * 
- * !!! na 50dagen gaat millis terug op 0 (voldoende voor de gisting)
  * TODO: stuur warnings als +50min koelen/warmen
  * TODO: stuur bericht als teveel boven/onder temp
  */
@@ -29,14 +28,14 @@
 bool    debug                     = true;
 bool    debug_tilt                = false; // true=serieel tilt-test
 bool    debug_buttons             = false; // true=serieel button-test
-bool    debug_msg                 = true;  // true=serieel msg-test
+bool    debug_msgcsv              = true;  // true=serieel csv-formaat
 bool    debug_wifi                = false; // true=serieel wifi-test
 bool    send_msg                  = true;  // true=send mails
 String  versie                    = "4.0"; // versienummer
 int     lcdBaud                   = 115200;// LCD baudrate
 
 int     millisMessage             = 60000; // Tijd tss twee messages 1000=1sec
-int     millisBetweenMessages     = 0;     // Verstreken tijd
+int     millisElapsedMessages     = 0;     // Verstreken tijd
 boolean mailSend                  = false; // true = mail verzenden gelukt
 
 int     currentControllerState    = 1;     // 0=Koelen, 1=Niet-actief, 2=Verwarmen
@@ -47,8 +46,8 @@ float   frigoHumi                 = 0 ;    // vochtigheid
 float   targetTemp                = 23.0;  // Te handhaven temperatuur
 float   coolingThreshold          = 1.0;   // Uitstelwaaarde voor koeling start
 float   heatingThreshold          = 1.0;   // Uitstelwaarde voor verwarmen start
-float   maxTemp                   = 0;     // hoogste temperatuur die bereikt werd
-float   minTemp                   = 0;     // laagste temperatuur die bereikt werd
+float   maxWortTemp                   = 0;     // hoogste temperatuur die bereikt werd
+float   minWortTemp                   = 0;     // laagste temperatuur die bereikt werd
 int     maxTimeHeating            = 0;     // langste tijd status VERWARMEN (millis)
 int     maxTimeCooling            = 0;     // langste tijd status KOELEN (millis)
 
@@ -65,20 +64,19 @@ boolean isBacklightActive         = true;  // LCD momenteel actief?
 
 float   gyro_X                    = 0;     // tilt-x-as
 float   gyro_Y                    = 0;     // tilt-y-as
-float   max_tilt                  = 0.20;  // verschil op x/y-as
+float   tiltThreshold             = 0.20;  // verschil op x/y-as
 int     currentTilt               = 0;     // de huidige tiltwaarde
 int     lastTilt                  = 0;     // de vorige tiltwaarde
-long    lastmillis_tilt           = 0;     // millis van de laaste 0-tilt
-int     between_tilts                   = 0;     // Tijd tussen twee tilts
+long    millisLastTilt            = 0;     // millis van de laaste 0-tilt
+int     millisBetweenTilts        = 0;     // Tijd tussen twee tilts
 
-int     countTilts                = 0;     // Aantal tilts in millisMessage
+int     countTilts                = 0;     // Aantal tilts in een millisMessage
 int     countTiltsTotal           = 0;     // Aantal tilts sinds start
 int     countStatHeat             = 0;     // Aantal HEAT binnen millisMessage
 int     countStatHeatTotal        = 0;     // Aantal Heat sinds start
 int     countStatCool             = 0;     // Aantal COOL binnen millisMessage
 int     countStatCoolTotal        = 0;     // Aantal COOL sinds start
 
-long    startMillis               = 0;     // Bewaar startpunt programma
 int     currentMillis             = 0;     // millis op moment van de test = Nu!
 time_t  startDateInt              = 0;     // Startdatum/uur (DateTime)
 
@@ -102,8 +100,8 @@ void setup(void) {
     }
   }
   
-  // Initialiseer wortTemp/max-minTemp
-  maxTemp = minTemp = getwortTemperature();
+  // Initialiseer wortTemp/max-minWortTemp
+  maxWortTemp = minWortTemp = getwortTemperature();
 }
 
 /**
@@ -121,7 +119,7 @@ void loop(void) {
     delay(DELAY);                           // !! de enige delay in het programma
   }
 
-  sendMessage();                            // Zend bericht als tijd verstreken 
+  if (send_msg) {sendMessage();}            // Zend bericht als tijd verstreken 
   displayState();                           // update de LCDdisplay
 }
 
@@ -129,10 +127,17 @@ void loop(void) {
  * Haal de huidige temperatuur op en update MAX- en MIN-Temp
  */
 void updateTemperature() {
-  wortTemp   = getwortTemperature();
+  wortTemp = getwortTemperature();
   getfrigoTempHumi();
-  if (wortTemp > maxTemp) {maxTemp = wortTemp;}
-  else if (wortTemp < minTemp) {minTemp = wortTemp;}
+  
+  // Alert-message als er iets grondig fout loopt
+  if ( send_msg ) {
+    if ( wortTemp > (targetTemp + (coolingThreshold + TEMP_DANGER)) ) {sendAlertMessage();}
+    if ( wortTemp < (targetTemp - (heatingThreshold - TEMP_DANGER)) ) {sendAlertMessage();}  
+  }
+  
+  if (wortTemp > maxWortTemp) {maxWortTemp = wortTemp;}
+  else if (wortTemp < minWortTemp) {minWortTemp = wortTemp;}
 }
 
 /**
@@ -153,6 +158,7 @@ void getfrigoTempHumi() {
 /**
  * Wijzig status adhv temperatuur + bewaar de timers 
  * (HEATING) <=> (INACTIVE) <=> (COOLING)
+ * debug_msgcsv=true --> serial print csv-formaat bij elke statusupdate
  */
 void controlState() {
   currentMillis = millis();
@@ -160,6 +166,7 @@ void controlState() {
     // Momenteel aan het KOELEN
     case STATE_COOLING:
       if (wortTemp < targetTemp + coolingThreshold) {
+        if (debug_msgcsv) {serialMsgCsv();}
         //stop KOELEN + zet INACTIEF
         currentControllerState = STATE_INACTIVE;
         if (currentMillis - millisInControllerState > maxTimeCooling) {
@@ -167,11 +174,15 @@ void controlState() {
         }
         millisInControllerState = currentMillis;
         digitalWrite(COOLING_PIN, LOW);
+      } else {
+        // Alert-message als er iets grondig fout loopt
+        if ( send_msg && millisInControllerState > STATE_DANGER ) {sendAlertMessage();}
       }
       break;
     // Momenteel INACTIEF = niks aan het doen
     case STATE_INACTIVE:
       if (wortTemp < targetTemp - heatingThreshold) {
+        if (debug_msgcsv) {serialMsgCsv();}
         //start VERWARMEN
         currentControllerState = STATE_HEATING;
         millisInControllerState = currentMillis;
@@ -180,6 +191,7 @@ void controlState() {
         digitalWrite(HEATING_PIN, HIGH);
       }
       else if (wortTemp > targetTemp + coolingThreshold) {
+        if (debug_msgcsv) {serialMsgCsv();}
         //start KOELEN
         currentControllerState = STATE_COOLING;
         millisInControllerState = currentMillis;
@@ -191,6 +203,7 @@ void controlState() {
     // Momenteel aan het VERWARMEN
     case STATE_HEATING:
       if (wortTemp > targetTemp - heatingThreshold) {
+        if (debug_msgcsv) {serialMsgCsv();}
         //stop VERWARMEN
         currentControllerState = STATE_INACTIVE;
         if (currentMillis - millisInControllerState > maxTimeHeating) {
@@ -198,13 +211,16 @@ void controlState() {
         }
         millisInControllerState = currentMillis;
         digitalWrite(HEATING_PIN, LOW);
-      } // if
+      } else {
+        // Alert-message als er iets grondig fout loopt
+        if ( send_msg && millisInControllerState > 900000 ) {sendAlertMessage();}
+      }
       break;
-  } // switch
+  }
 }
 
 /*
- * Tiltsensor
+ * Tiltsensor: tilt = 0 --> is beneden = 1 --> is naar boven
  */
 void updateTilted() {
   currentMillis = millis();
@@ -212,8 +228,8 @@ void updateTilted() {
   if (currentTilt != lastTilt) {
     // enkel de neutrale stand (=beneden) telt
     if (currentTilt == 0) {
-      between_tilts = currentMillis - lastmillis_tilt;
-      lastmillis_tilt = currentMillis;
+      millisBetweenTilts = currentMillis - millisLastTilt;
+      millisLastTilt = currentMillis;
       countTilts++;         // tel 1 bij het aantal tiltwijzigingen binnen 1 bericht
       countTiltsTotal++;    // tel 1 bij totaal aantal tilts
     }
@@ -232,10 +248,10 @@ void getTilt() {
   if (gyro_Y < 0) { gyro_Y = gyro_Y * -1; }
 
   currentTilt = 0;
-  // Vergelijk de x-y-meting met max_tilt
+  // Vergelijk de x-y-meting met tiltThreshold
   // om te vermijden dat bij naar beneden vallen er door 
   // de terugslag een nieuwe tilt geregistreerd wordt
-  if (gyro_X > max_tilt || gyro_Y > max_tilt) {
+  if (gyro_X > tiltThreshold || gyro_Y > tiltThreshold) {
     currentTilt = 1;
   } 
 }
@@ -245,92 +261,33 @@ void getTilt() {
  */
 void sendMessage() {
   currentMillis = millis();
-  if ( currentMillis - millisBetweenMessages > millisMessage) {
-    millisBetweenMessages = currentMillis;
-    if (debug_msg) {serialMsg();}
-
-    if (send_msg) {
-      if (!wifiSuccess) {
-        wifiSuccess = setupWifi(10);
-      }
-      if (wifiSuccess) {
-        String subject      = "Gist Controller " + versie;
-        String message      = "";
-        message = fillMessage();
-        mailSend = sendMail(subject,message);
-        }
-      }
-    countTilts = 0;
-    countStatHeat = 0;
-    countStatCool = 0;
-  }
-}
-
-/*
- * Send Mail
- */
-boolean sendMail(String subject, String message) {
-  boolean state       = true;
-  String error_msg    = "";
-  
-  Gsender *gsender = Gsender::Instance();    // Getting pointer to class instance
-  if(gsender->Subject(subject)->Send("gist.controller@gmail.com", message)) {
-    state = true;
-  }
-  else 
-  {
-    error_msg = gsender->getError(); 
-    state = false;
-  }
-  if (debug_wifi) {serialMsgSend(state,error_msg);}
-  return state;
-}
-
-/*
- * Connecteer met wifi – returns true als gelukt
- */
-boolean setupWifi(int loops) {
-  int cntLoops          = 0;
-  boolean wifiState     = true; 
-  int inputStringLength = sizeof(passwordB64);
-  int decodedLength     = Base64.decodedLength(passwordB64, inputStringLength);
-  char decodedString[decodedLength];
-  Base64.decode(decodedString, passwordB64, inputStringLength);
-
-  WiFi.begin(ssid, decodedString);
-  // Wait for connection
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    if (debug_wifi) {Serial.print(".");}
-    if (cntLoops > loops) {
-      wifiState = false;
-      break;
+  if ( currentMillis - millisElapsedMessages > millisMessage) {
+    if (!wifiSuccess) {
+      wifiSuccess = setupWifi(10);
     }
-    cntLoops++;
-  }
-  if (debug_wifi) {serialWifi(wifiState);}
-  return wifiState;
-}
-
-/*
- * Ophalen actuele tijd
- */
-boolean setupDateTime(int loops) {
-  int cntLoops          = 0;
-  boolean datetimeState = true; 
-  DateTime.setTimeZone(1);
-  DateTime.begin();
-  while (!DateTime.isTimeValid()) {
-    delay(100);
-    if (debug_wifi) {Serial.print(".");}
-    if (cntLoops > loops) {
-      datetimeState = false;
-      break;
+    if (wifiSuccess) {
+      millisElapsedMessages = currentMillis;
+      String subject      = "Gist Controller " + versie;
+      String message      = "";
+      message = fillMessage();
+      mailSend = sendMail(subject,message);
     }
-    cntLoops++;
-    DateTime.begin();
   }
-  return datetimeState;
+  countTilts = 0;
+  countStatHeat = 0;
+  countStatCool = 0;
+}
+/*
+ * Stuur een Alertmessage
+ */
+void sendAlertMessage() {
+  if (!wifiSuccess) {wifiSuccess = setupWifi(10);}
+  if (wifiSuccess) {
+      String subject      = "ALERT Gist Controller " + versie;
+      String message      = "";
+      message = fillAlertMessage();
+      mailSend = sendMail(subject,message);
+  }
 }
 
 /**
@@ -339,7 +296,7 @@ boolean setupDateTime(int loops) {
 void controlDisplayState() {
   currentMillis = millis();
   
-  // Zet LCD uit na verstrijken timeout
+  // Zet LCD uit na verstrijken timeout (REDIRECT_TIMEOUT * 5)
   checkBacklightTimeout(currentMillis);
   
   // welke knop is er gedrukt?
@@ -372,6 +329,34 @@ void controlDisplayState() {
   else if ( whichButtonPressed == BUTTON_SELECT ) {
     handleSelect(currentMillis);
   }
+}
+
+/**
+ * Zet LCD-backlight uit als timeout verstreken (REDIRECT_TIMEOUT * 5)
+ */
+void checkBacklightTimeout(int mtime) {
+  if (   isBacklightActive 
+      && (mtime - backlightTimeout) > (REDIRECT_TIMEOUT * 5) ) {
+    disableBacklight(mtime);
+  }
+}
+/**
+ * disable LCDscherm
+ */
+void disableBacklight(int mtime) {
+  lcd.noBacklight();
+  lcd.noDisplay();
+  isBacklightActive = false;
+  backlightTimeout = mtime;
+}
+/**
+ * enable LCDscherm
+ */
+void enableBacklight(int mtime) {
+  lcd.display();
+  lcd.backlight();
+  isBacklightActive = true;
+  backlightTimeout = mtime;
 }
 
 /**
@@ -467,12 +452,8 @@ void handleUpDown( int whichButtonPressed, int mtime ) {
  * Knop = SELECT = LCDscherm aan/uit
  */
 void handleSelect(int mtime) {
-  if (isBacklightActive) {
-    disableBacklight(mtime);
-  }
-  else {
-    enableBacklight(mtime);
-  }
+  if (isBacklightActive) {disableBacklight(mtime);}
+  else {enableBacklight(mtime);}
 }
 
 /*
@@ -557,14 +538,12 @@ boolean initComponents() {
      lcdShowInit("Error",11);
      return false;
   } else {lcdShowInit("gelukt",10);}
-
   // test DS18B20
   lcdShowInit("DS18B20.........",0);
   if (getwortTemperature() == -127) {
      lcdShowInit("Error",11);
      return false;
   } else {lcdShowInit("gelukt",10);}
-  
   // initialiseer gyro...
   lcdShowInit("ADXL345.........",0); 
   if(!tilter.begin()) {
@@ -572,15 +551,18 @@ boolean initComponents() {
     return false;
   } else {lcdShowInit("gelukt",10);}
   tilter.setRange(ADXL345_RANGE_4_G);        // initialiseer ADXL345
-  
-  // Verbind wifi als send_msg = true
+  // Initialiseer wifi als send_msg = true
   if (send_msg) {
     lcdShowInit("Wifi............",0);
     if (!wifiSuccess) {wifiSuccess = setupWifi(50);}
     if (!wifiSuccess) {
       lcdShowInit("Error",11);
       return false;
-    } else {lcdShowInit("gelukt",10);}
+    } else {
+      lcdShowInit("gelukt",10);
+      lcdShowInit(WiFi.localIP().toString().c_str(),0);
+      delay(5000);
+      }
   }
   // Ophalen DateTime
   lcdShowInit("DateTime........",0);
@@ -590,14 +572,79 @@ boolean initComponents() {
     return false;
   } else {
     lcdShowInit("gelukt",10);
-    // Bewaar het startpunt
-    startDateInt = DateTime.now();
-    startMillis = millis();
-    backlightTimeout = startMillis;
-    millisBetweenMessages = startMillis;
-    }  
+  }
 
+  // Bewaar het startpunt
+  startDateInt = DateTime.now();
+  backlightTimeout = millis();
+  millisElapsedMessages = millis();
   return true;
+}
+
+/*
+ * Send Mail
+ */
+boolean sendMail(String subject, String message) {
+  boolean state       = true;
+  String error_msg    = "";
+  
+  Gsender *gsender = Gsender::Instance();    // Getting pointer to class instance
+  if(gsender->Subject(subject)->Send("gist.controller@gmail.com", message)) {
+    state = true;
+  }
+  else 
+  {
+    error_msg = gsender->getError(); 
+    state = false;
+  }
+  return state;
+}
+
+/*
+ * Connecteer met wifi – returns true als gelukt
+ */
+boolean setupWifi(int loops) {
+  int cntLoops          = 0;
+  boolean wifiState     = true; 
+  int inputStringLength = sizeof(passwordB64);
+  int decodedLength     = Base64.decodedLength(passwordB64, inputStringLength);
+  char decodedString[decodedLength];
+  Base64.decode(decodedString, passwordB64, inputStringLength);
+
+  WiFi.begin(ssid, decodedString);
+  // Wait for connection
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    if (debug_wifi) {Serial.print(".");}
+    if (cntLoops > loops) {
+      wifiState = false;
+      break;
+    }
+    cntLoops++;
+  }
+  if (debug_wifi) {serialWifi(wifiState);}
+  return wifiState;
+}
+
+/*
+ * Ophalen actuele tijd
+ */
+boolean setupDateTime(int loops) {
+  int cntLoops          = 0;
+  boolean datetimeState = true; 
+  DateTime.setTimeZone(1);
+  DateTime.begin();
+  while (!DateTime.isTimeValid()) {
+    delay(100);
+    if (debug_wifi) {Serial.print(".");}
+    if (cntLoops > loops) {
+      datetimeState = false;
+      break;
+    }
+    cntLoops++;
+    DateTime.begin();
+  }
+  return datetimeState;
 }
 
 /*
@@ -613,56 +660,26 @@ void lcd_serial_msg_Init() {
   lcd.setCursor(8,1);
   lcd.print(versie);
   
-  if ( debug || debug_tilt || debug_wifi || debug_buttons || debug_msg) {
+  if ( debug || debug_tilt || debug_wifi || debug_buttons || debug_msgcsv) {
       Serial.begin(lcdBaud);
       Serial.println("Initialisatie Gist-controller");
   }
   delay(1000);
 
-  if (debug_msg) {
-    Serial.print("startdatum;meetpunt;verstreken;status;tijdinstatus;");
+  if (debug_msgcsv) {
+    Serial.print("startpunt;meetpunt;status;tijdinstatus;");
     Serial.print("worttemp;frigotemp;vochtigheid;coolingsinframe;");
     Serial.println("heatingsinframe;tiltsinframe;tijdtussentilts");
   }
 }
 
 /*
- * LCD: setup oké 
+ * LCD: display boodschap 'initmsg' op lijn 2 positie 'pos' 
  */
 void lcdShowInit(String initmsg, int pos) {
   lcd.setCursor(pos,2);
   lcd.print(initmsg);
   delay(1000);
-}
-
-/**
- * Zet LCD-backlight uit als timeout verstreken (REDIRECT_TIMEOUT * 5)
- */
-void checkBacklightTimeout(int mtime) {
-  if (   isBacklightActive 
-      && (mtime - backlightTimeout) > (REDIRECT_TIMEOUT * 5) ) {
-    disableBacklight(mtime);
-  }
-}
-
-/**
- * disable LCDscherm
- */
-void disableBacklight(int mtime) {
-  lcd.noBacklight();
-  lcd.noDisplay();
-  isBacklightActive = false;
-  backlightTimeout = mtime;
-}
-
-/**
- * enable LCDscherm
- */
-void enableBacklight(int mtime) {
-  lcd.display();
-  lcd.backlight();
-  isBacklightActive = true;
-  backlightTimeout = mtime;
 }
 
 /**
@@ -683,10 +700,10 @@ void displayState()  {
       displayMaxHistory();
       break;
     case DISPLAY_SET_MAX_TEMP:
-      displayMaxTempThreshold();
+      displaymaxWortTempThreshold();
       break;
     case DISPLAY_SET_MIN_TEMP:
-      displayMinTempThreshold();
+      displayminWortTempThreshold();
       break;
     case DISPLAY_SET_MSG_TIME:
       displaysetmsgtime();
@@ -770,7 +787,7 @@ void displayMinHistory() {
   lcd.setCursor(0,1);
   lcd.print("Min: ");
   lcd.setCursor(5,1);
-  lcd.print(minTemp);
+  lcd.print(minWortTemp);
 }
 /**
  * display temp history MAX
@@ -782,13 +799,13 @@ void displayMaxHistory() {
   lcd.setCursor(0,1);
   lcd.print("Max: ");
   lcd.setCursor(5,1);
-  lcd.print(maxTemp);
+  lcd.print(maxWortTemp);
 }
 
 /**
  * display max temp threshold
  */ 
-void displayMaxTempThreshold() {
+void displaymaxWortTempThreshold() {
   lcd.clear();
   lcd.setCursor(0,0);
   lcd.print("Koel Threshold");
@@ -801,7 +818,7 @@ void displayMaxTempThreshold() {
 /**
  * display min temp threshold
  */ 
-void displayMinTempThreshold() {
+void displayminWortTempThreshold() {
   lcd.clear();
   lcd.setCursor(0,0);
   lcd.print("Warm Threshold");
@@ -910,14 +927,13 @@ String zeroPad( int value ) {
 
 /*
  * vul string met informatie om te verzenden als message
+ * <BR> = nieuwe lijn <p> = nieuwe paragraaf
  */
 String fillMessage() {
   String bmsg       = "";
 
-  bmsg = bmsg + DateFormatter::format("Startdatum: %d/%m/%Y %H:%M:%S", startDateInt);
-  bmsg = bmsg + DateFormatter::format(" Meetpunt  : %d/%m/%Y %H:%M:%S", DateTime.now());
-  bmsg += "<BR>";
-  bmsg = bmsg + "Verstreken tijd  : " + showTime((millis() - startMillis)/1000,true);
+  bmsg = bmsg + DateFormatter::format("Startpunt: %d/%m/%Y %H:%M:%S", startDateInt);
+  bmsg = bmsg + DateFormatter::format(" Meetpunt: %d/%m/%Y %H:%M:%S", DateTime.now());
   bmsg += "<p>";
             
   bmsg += "Momenteel ";
@@ -933,13 +949,13 @@ String fillMessage() {
       break;
   }
   bmsg = bmsg + showTime(millisInControllerState/1000,false) + "<BR>";
-  bmsg = bmsg + "Huidige temperatuur: " + wortTemp;
+  bmsg = bmsg + "Wort temperatuur: " + wortTemp;
   bmsg = bmsg + " Frigo temperatuur: " + frigoTemp;
   bmsg = bmsg + " vochtigheid: " + frigoHumi;
   bmsg += "<p>";
  
-  bmsg = bmsg + "MaxTemp: " + maxTemp + "<BR>";
-  bmsg = bmsg + "MinTemp: " + minTemp + "<BR>";
+  bmsg = bmsg + "maxWortTemp: " + maxWortTemp + "<BR>";
+  bmsg = bmsg + "minWortTemp: " + minWortTemp + "<BR>";
   bmsg = bmsg + "MaxTimeHeating: ";
   bmsg = bmsg + showTime(maxTimeHeating/1000,false) + "<BR>";
   bmsg = bmsg + "MaxTimeCooling: ";
@@ -954,32 +970,61 @@ String fillMessage() {
 
   bmsg = bmsg + "Aantal tilts: " + countTilts;
   bmsg = bmsg + " Totaal: " + countTiltsTotal + "<BR>";
-  bmsg = bmsg + "Laatste tilt-tijd: " + showTime(between_tilts/1000,true);
+  bmsg = bmsg + "Laatste tilt-tijd: " + showTime(millisBetweenTilts/1000,true);
   bmsg += "<p>";
   
   return bmsg;
 }
 
-void serialMsg() {
+/*
+ * vul string met Alertinformatie om te verzenden
+ * <BR> = nieuwe lijn <p> = nieuwe paragraaf
+ */
+String fillAlertMessage() {  
+  String bmsg       = "";
+
+  bmsg = bmsg + DateFormatter::format("Startpunt: %d/%m/%Y %H:%M:%S", startDateInt);
+  bmsg = bmsg + DateFormatter::format(" Meetpunt: %d/%m/%Y %H:%M:%S", DateTime.now());
+  bmsg += "<p>";
+            
+  bmsg += "Momenteel ";
+  switch ( currentControllerState ) {
+    case STATE_COOLING:
+      bmsg = bmsg + "Koelen   : ";
+      break;
+    case STATE_INACTIVE:
+      bmsg = bmsg + "Inactief : ";
+      break;
+    case STATE_HEATING:
+      bmsg = bmsg + "Verwarmen: ";
+      break;
+  }
+  bmsg = bmsg + showTime(millisInControllerState/1000,false) + "<BR>";
+  
+  bmsg = bmsg + "Wort temperatuur: " + wortTemp;
+  bmsg = bmsg + " Frigo temperatuur: " + frigoTemp;
+  bmsg += "<p>";
+  
+  return bmsg;
+}
+
+void serialMsgCsv() {
   // startdatum
   Serial.print(DateFormatter::format("%d/%m/%Y %H:%M:%S", startDateInt));
   Serial.print(";");
   // meetpunt
   Serial.print(DateFormatter::format("%d/%m/%Y %H:%M:%S", DateTime.now()));
   Serial.print(";");
-  // verstreken tijd
-  Serial.print(showTime((millis() - startMillis)/1000,true));
-  Serial.print(";");
   // status op meetpunt
   switch ( currentControllerState ) {
     case STATE_COOLING:
-      Serial.print("Koelen");
+      Serial.print("StopKoelen");
       break;
     case STATE_INACTIVE:
-      Serial.print("Inactief");
+      Serial.print("StopInactief");
       break;
     case STATE_HEATING:
-      Serial.print("Verwarmen");
+      Serial.print("StopVerwarmen");
       break;
   }
   Serial.print(";");
@@ -1007,7 +1052,7 @@ void serialMsg() {
   Serial.print(countTilts);
   Serial.print(";");
   // tijd tussen 0-1 laatste tilt
-  Serial.print(showTime(between_tilts/1000,true));
+  Serial.print(showTime(millisBetweenTilts/1000,true));
 
   Serial.println("");
 }
@@ -1025,22 +1070,13 @@ void serialWifi(boolean wstate) {
   }
 }
 
-void serialMsgSend(boolean mstate, String msg_error) { 
-  if (mstate) {
-    Serial.println("Message send");
-  } else {
-    Serial.print("Error sending message: ");
-    Serial.println(msg_error);
-  }
-}
-
 void serialTilted() {
   Serial.print("Tilt = ");
   Serial.print(String(lastTilt));
   Serial.print(" op: ");
-  Serial.print(showTime(lastmillis_tilt/1000,true));
+  Serial.print(showTime(millisLastTilt/1000,true));
   Serial.print(" Verschil: ");
-  Serial.print(showTime(between_tilts/1000,true));
+  Serial.print(showTime(millisBetweenTilts/1000,true));
   Serial.print(" Count/Tot: ");
   Serial.print(countTilts);
   Serial.print(" / ");

@@ -11,6 +11,7 @@ const float TEMP_INCR             = 0.5;   // Tel bij targetTemp UP/DOWN
 const float MINIMUM_TARGET        = 20.0;  // Minimum toegelaten targetTemp
 const float MAXIMUM_TARGET        = 23.0;  // Maximum toegelaten targetTemp
 const float TEMP_THRESHOLD_INCR   = 0.25;  // Tel bij threashold UP/DOWN
+const int   TEMP_DANGER           = 2;     // temp +- thres + danger = ALERT
 const float MINIMUM_THRESHOLD     = 0.1;   // Minimum toegelaten MIN-THREASH
 const float MAXIMUM_THRESHOLD     = 5.0;   // Maximum toegelaten MAX-THREASH
 const int   REDIRECT_TIMEOUT      = 5000;  // Terug naar hoofdscherm *5=Timeout (millis)
@@ -47,6 +48,7 @@ const int   BUTTON_SELECT         = 5;
 const int   STATE_COOLING         = 0;
 const int   STATE_INACTIVE        = 1;
 const int   STATE_HEATING         = 2;
+const int   STATE_DANGER          = 900000; // stuur alert als 15min bezig
 
 // LCDdisplay waardes
 const int   DISPLAY_SUMMARY           = 0;
