@@ -5,7 +5,7 @@
 const char* ssid                  = "Fortress_Guest";            
 char passwordB64[]                = "d2VsY29tZWd1ZXN0MjczNTUw";  
 
-// temp & delays
+// temp & delays: 1000millis = 1 sec
 const int   DELAY                 = 100;   // 0.1 seconde (loop x10 = +-1sec delay)
 const float TEMP_INCR             = 0.5;   // Tel bij targetTemp UP/DOWN
 const float MINIMUM_TARGET        = 20.0;  // Minimum toegelaten targetTemp
@@ -30,7 +30,7 @@ const int   DHT_PIN               = 13;    // GPIO13 (D7) Temperatuur en vochtig
 const int   LEFT_10BIT_ADC        = 815;   // Links
 const int   RIGHT_10BIT_ADC       = 545;   // Rechts
 const int   UP_10BIT_ADC          = 870;   // Boven
-const int   DOWN_10BIT_ADC        = 10;    // Onder
+const int   DOWN_10BIT_ADC        = 5;    // Onder
 const int   SELECT_10BIT_ADC      = 725;   // Selecteer
 const int   NO_BUTTON_ADC         = 1023;  // Geen knop
 // deze constante wordt bij de gelezen weerstand geteld = schommeling opvangen

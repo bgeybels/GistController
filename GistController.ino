@@ -9,8 +9,6 @@
  * Relays:      Cooling - Heating
  * ESP8266      Email naar gist.controller@gmail.com
  * 
- * TODO: stuur warnings als +50min koelen/warmen
- * TODO: stuur bericht als teveel boven/onder temp
  */
  
 #include <LiquidCrystal_I2C.h>             // Librarys voor LCD I2C
@@ -28,13 +26,13 @@
 bool    debug                     = true;
 bool    debug_tilt                = false; // true=serieel tilt-test
 bool    debug_buttons             = false; // true=serieel button-test
-bool    debug_msgcsv              = true;  // true=serieel csv-formaat
+bool    debug_msgcsv              = false; // true=serieel csv-formaat
 bool    debug_wifi                = false; // true=serieel wifi-test
-bool    send_msg                  = true;  // true=send mails
+bool    send_msg                  = false; // true=send mails (gewoon + alert)
 String  versie                    = "4.0"; // versienummer
 int     lcdBaud                   = 115200;// LCD baudrate
 
-int     millisMessage             = 60000; // Tijd tss twee messages 1000=1sec
+int     millisMessage             = 600000 // Tijd tss twee messages 1000=1sec
 int     millisElapsedMessages     = 0;     // Verstreken tijd
 boolean mailSend                  = false; // true = mail verzenden gelukt
 
@@ -46,8 +44,8 @@ float   frigoHumi                 = 0 ;    // vochtigheid
 float   targetTemp                = 23.0;  // Te handhaven temperatuur
 float   coolingThreshold          = 1.0;   // Uitstelwaaarde voor koeling start
 float   heatingThreshold          = 1.0;   // Uitstelwaarde voor verwarmen start
-float   maxWortTemp                   = 0;     // hoogste temperatuur die bereikt werd
-float   minWortTemp                   = 0;     // laagste temperatuur die bereikt werd
+float   maxWortTemp               = 0;     // hoogste temperatuur die bereikt werd
+float   minWortTemp               = 0;     // laagste temperatuur die bereikt werd
 int     maxTimeHeating            = 0;     // langste tijd status VERWARMEN (millis)
 int     maxTimeCooling            = 0;     // langste tijd status KOELEN (millis)
 
@@ -234,8 +232,8 @@ void updateTilted() {
       countTiltsTotal++;    // tel 1 bij totaal aantal tilts
     }
       lastTilt = currentTilt;
-      if (debug_tilt) {serialTilted();}
     }
+    if (debug_tilt) {serialTilted();}
 }
 
 void getTilt() {
@@ -560,6 +558,7 @@ boolean initComponents() {
       return false;
     } else {
       lcdShowInit("gelukt",10);
+      lcdShowInit("................",0);
       lcdShowInit(WiFi.localIP().toString().c_str(),0);
       delay(5000);
       }
