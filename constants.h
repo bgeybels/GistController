@@ -4,6 +4,9 @@
 // paswoord in base64: omzetten via https://www.base64encode.org
 const char* ssid                  = "Fortress_Guest";            
 char passwordB64[]                = "d2VsY29tZWd1ZXN0MjczNTUw";  
+// DonBosco Wifi
+//const char* ssid                  = "DBTI_34344";            
+//char passwordB64[]                = "xxxxxx";  
 
 // temp & delays: 1000millis = 1 sec
 const int   DELAY                 = 100;   // 0.1 seconde (loop x10 = +-1sec delay)
@@ -11,10 +14,10 @@ const float TEMP_INCR             = 0.5;   // Tel bij targetTemp UP/DOWN
 const float MINIMUM_TARGET        = 20.0;  // Minimum toegelaten targetTemp
 const float MAXIMUM_TARGET        = 23.0;  // Maximum toegelaten targetTemp
 const float TEMP_THRESHOLD_INCR   = 0.25;  // Tel bij threashold UP/DOWN
-const int   TEMP_DANGER           = 2;     // temp +- thres + danger = ALERT
+const int   TEMP_DANGER           = 1;     // temp +- thres + danger = ALERT
 const float MINIMUM_THRESHOLD     = 0.1;   // Minimum toegelaten MIN-THREASH
 const float MAXIMUM_THRESHOLD     = 5.0;   // Maximum toegelaten MAX-THREASH
-const int   REDIRECT_TIMEOUT      = 5000;  // Terug naar hoofdscherm *5=Timeout (millis)
+const int   REDIRECT_TIMEOUT      = 10000;  // Terug naar hoofdscherm *5=Timeout (millis)
 const int   BETWEEN_MSG_INCR      = 10;    // Tel bij targettimebetweenmsg (minuten)
 
 // Pins in gebruik
@@ -30,7 +33,7 @@ const int   DHT_PIN               = 13;    // GPIO13 (D7) Temperatuur en vochtig
 const int   LEFT_10BIT_ADC        = 815;   // Links
 const int   RIGHT_10BIT_ADC       = 545;   // Rechts
 const int   UP_10BIT_ADC          = 870;   // Boven
-const int   DOWN_10BIT_ADC        = 5;    // Onder
+const int   DOWN_10BIT_ADC        = 10;    // Onder
 const int   SELECT_10BIT_ADC      = 725;   // Selecteer
 const int   NO_BUTTON_ADC         = 1023;  // Geen knop
 // deze constante wordt bij de gelezen weerstand geteld = schommeling opvangen
@@ -62,7 +65,8 @@ const int   DISPLAY_SET_MAX_TEMP      = 7;
 const int   DISPLAY_SET_MIN_TEMP      = 8;
 const int   DISPLAY_SET_TARGET        = 9;
 const int   DISPLAY_SET_MSG_TIME      = 10;
-const int   NO_OF_LCD_STATES          = 11;
+const int   DISPLAY_IP                = 11;
+const int   NO_OF_LCD_STATES          = 12;
 
 // Omzetten millis/seconden naar leesbare vorm
 #define SECS_PER_MIN  (60UL)
