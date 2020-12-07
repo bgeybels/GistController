@@ -2,6 +2,7 @@
  * GIP Jobbe Geybels 2020-2021
  * Gistcontroller v4.0 op een NODEMCU-board (ESP8266)
  * 
+ * WifiSetup    via WiFiManager
  * I2C-ADXL345  Gyroscoop
  * I2C-LCD      LCD
  * DS18B20      Tempsensor: Wort
@@ -11,16 +12,16 @@
  * 
  */
  
-#include <LiquidCrystal_I2C.h>             // Librarys voor LCD I2C
-#include <Adafruit_ADXL345_U.h>            // Librarys ADXL345
-#include <Adafruit_Sensor.h>               // Librarys ADXL345
-#include <DHT.h>                           // Librarys DHT11
-#include <DallasTemperature.h>             // Librarys voor DS18B20
-#include <OneWire.h>                       // Librarys voor DS18B20
-#include <ESP8266WiFi.h>                   // Librarys voor wifi
+#include <LiquidCrystal_I2C.h>             // Library voor LCD I2C
+#include <Adafruit_ADXL345_U.h>            // Library ADXL345
+#include <Adafruit_Sensor.h>               // Library ADXL345
+#include <DHT.h>                           // Library DHT11
+#include <DallasTemperature.h>             // Libraryvoor DS18B20
+#include <OneWire.h>                       // Library voor DS18B20
+#include <ESP8266WiFi.h>                   // Library voor wifi
+#include <WiFiManager.h>                   // Library voor WifiManager
 #include <ESPDateTime.h>                   // Datum en tijd
 #include "Gsender.h"                       // GMail settings
-#include "Base64.h"                        // base-64 voor wifi-paswoord
 #include "constants.h"                     // Constante parameters
 
 bool    debug                     = true;
@@ -29,7 +30,7 @@ bool    debug_buttons             = false; // true=serieel button-test
 bool    debug_msgcsv              = false; // true=serieel csv-formaat
 bool    debug_wifi                = false; // true=serieel wifi-test
 bool    send_msg                  = true;  // true=send mails (gewoon + alert)
-String  versie                    = "4.0"; // versienummer
+String  versie                    = "5.0"; // versienummer
 int     lcdBaud                   = 115200;// LCD baudrate
 
 // 3600000=1h 1800000=30min 600000=10min 60000=1min
@@ -90,6 +91,7 @@ Adafruit_ADXL345_Unified tilter = Adafruit_ADXL345_Unified(12345);
 OneWire oneWire(TEMP_PIN);
 DallasTemperature sensors(&oneWire);
 DHT dht(DHT_PIN, DHT_TYPE);
+WiFiManager wifiManager;
 
 void setup(void) {
   // Initialseer LCD,Serieel en Serieel-message
@@ -272,7 +274,6 @@ void getTilt() {
 void sendMessage() {
   currentMillis = millis();
   if ( currentMillis - millisElapsedMessages > millisMessage) {
-    if (!wifiSuccess) {wifiSuccess = setupWifi(10);}
     if (wifiSuccess) {
       millisElapsedMessages = currentMillis;
       String subject      = "Gist Controller " + versie;
@@ -293,7 +294,6 @@ void sendMessage() {
 void sendAlertMessage() {
   --alertMaxTimer;
   if ( alertMaxTimer < 1) {
-    if (!wifiSuccess) {wifiSuccess = setupWifi(10);}
     if (wifiSuccess) {
       alertMaxTimer=alertCountDown;
       String subject      = "ALERT Gist Controller " + versie;
@@ -550,6 +550,22 @@ boolean initComponents() {
   delay(1000);                             // DHT11
   dht.begin();                             // DHT11
 
+  // Initialiseer wifi als send_msg = true
+  if (send_msg) {
+    lcdShowInit("WiFi...........",0);
+    //wifiManager.setDebugOutput(false);
+    wifiManager.setMinimumSignalQuality(10);
+    //Eerste parameter = naam accesspoint
+    //Tweede parameter = paswoord
+    wifiSuccess=wifiManager.autoConnect("AutoConnectAP", "gistcontroller");
+    if(!wifiSuccess) {
+      ESP.restart();
+    } else {
+      lcdShowInit("................",0);
+      lcdShowInit(WiFi.localIP().toString().c_str(),0);
+    }
+  }
+
   // test DHT11
   lcdShowInit("DHT11..........",0);
   getfrigoTempHumi();
@@ -570,20 +586,7 @@ boolean initComponents() {
     return false;
   } else {lcdShowInit("gelukt",10);}
   tilter.setRange(ADXL345_RANGE_4_G);        // initialiseer ADXL345
-  // Initialiseer wifi als send_msg = true
-  if (send_msg) {
-    lcdShowInit("Wifi............",0);
-    if (!wifiSuccess) {wifiSuccess = setupWifi(50);}
-    if (!wifiSuccess) {
-      lcdShowInit("Error",11);
-      return false;
-    } else {
-      lcdShowInit("gelukt",10);
-      lcdShowInit("................",0);
-      lcdShowInit(WiFi.localIP().toString().c_str(),0);
-      delay(5000);
-      }
-  }
+  
   // Ophalen DateTime
   lcdShowInit("DateTime........",0);
   if (!datetimeSuccess) {datetimeSuccess = setupDateTime(10);}
@@ -618,32 +621,6 @@ boolean sendMail(String subject, String message) {
     state = false;
   }
   return state;
-}
-
-/*
- * Connecteer met wifi – returns true als gelukt
- */
-boolean setupWifi(int loops) {
-  int cntLoops          = 0;
-  boolean wifiState     = true; 
-  int inputStringLength = sizeof(passwordB64);
-  int decodedLength     = Base64.decodedLength(passwordB64, inputStringLength);
-  char decodedString[decodedLength];
-  Base64.decode(decodedString, passwordB64, inputStringLength);
-
-  WiFi.begin(ssid, decodedString);
-  // Wait for connection
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    if (debug_wifi) {Serial.print(".");}
-    if (cntLoops > loops) {
-      wifiState = false;
-      break;
-    }
-    cntLoops++;
-  }
-  if (debug_wifi) {serialWifi(wifiState);}
-  return wifiState;
 }
 
 /*
@@ -923,7 +900,7 @@ void displayIP() {
   lcd.setCursor(0,0);
   lcd.print("IP:");
   lcd.setCursor(0,1);
-  if (!wifiSuccess) {
+  if (wifiSuccess) {
     lcd.print(WiFi.localIP().toString().c_str());
   }
 }
@@ -968,7 +945,7 @@ String zeroPad( int value ) {
 String fillMessage() {
   String bmsg       = "";
 
-  if (!wifiSuccess) {
+  if (wifiSuccess) {
     bmsg = bmsg + WiFi.localIP().toString().c_str();
   }
   bmsg = bmsg + DateFormatter::format("Startpunt: %d/%m/%Y %H:%M:%S", startDateInt);
@@ -1021,7 +998,7 @@ String fillMessage() {
  */
 String fillAlertMessage() {  
   String bmsg       = "";
-  if (!wifiSuccess) {
+  if (wifiSuccess) {
     bmsg = bmsg + WiFi.localIP().toString().c_str();
   }
   bmsg = bmsg + DateFormatter::format("Startpunt: %d/%m/%Y %H:%M:%S", startDateInt);
@@ -1101,7 +1078,7 @@ void serialMsgCsv() {
 void serialWifi(boolean wstate) {
   if (wstate) {
     Serial.println("");
-    Serial.println(ssid);
+    //Serial.println(ssid);
     Serial.print("IP address: ");
     Serial.println(WiFi.localIP());
   }
