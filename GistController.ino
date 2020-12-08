@@ -111,6 +111,7 @@ void setup(void) {
   
   // Initialiseer wortTemp/max-minWortTemp
   maxWortTemp = minWortTemp = getwortTemperature();
+  if ( send_msg ) {sendInitMessage();}
 }
 
 /**
@@ -278,7 +279,7 @@ void sendMessage() {
   if ( currentMillis - millisElapsedMessages > millisMessage) {
     if (WiFiConnected()) {
       millisElapsedMessages = currentMillis;
-      String subject      = "Gist Controller " + versie + " Doel:" + targetTemp;
+      String subject      = "Gist Controller " + versie + " Doel:" + targetTemp + "°C";
       String message      = "";
       message = fillMessage();
       mailSend = sendMail(subject,message);
@@ -291,11 +292,22 @@ void sendMessage() {
   }
 }
 /*
+ * Stuur initieel bericht
+ */
+void sendInitMessage() {
+  if (WiFiConnected()) {
+    String subject      = "Init Gist Controller " + versie + " Doel:" + targetTemp + "°C";
+    String message      = "";
+    message = fillAlertMessage();
+    mailSend = sendMail(subject,message);
+    }
+}
+/*
  * Stuur bericht bij statuswissel
  */
 void sendStateMessage() {
   if (WiFiConnected()) {
-    String subject      = "Status Gist Controller " + versie + " Doel:" + targetTemp;
+    String subject      = "Status Gist Controller " + versie + " Doel:" + targetTemp + "°C";
     String message      = "";
     message = fillStateMessage();
     mailSend = sendMail(subject,message);
@@ -309,7 +321,7 @@ void sendAlertMessage() {
   if ( alertMaxTimer < 1) {
     if (WiFiConnected()) {
       alertMaxTimer=alertCountDown;
-      String subject      = "ALERT Gist Controller " + versie + " Doel:" + targetTemp;
+      String subject      = "ALERT Gist Controller " + versie + " Doel:" + targetTemp + "°C";
       String message      = "";
       message = fillAlertMessage();
       mailSend = sendMail(subject,message);
