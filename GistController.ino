@@ -2,7 +2,7 @@
  * GIP Jobbe Geybels 2020-2021
  * Gistcontroller v4.0 op een NODEMCU-board (ESP8266)
  * 
- * WifiSetup    via WiFiManager
+ * WifiSetup    via WiFiManager (IPscherm+select=reconnect)
  * I2C-ADXL345  Gyroscoop
  * I2C-LCD      LCD
  * DS18B20      Tempsensor: Wort
@@ -29,7 +29,10 @@ bool    debug_tilt                = false; // true=serieel tilt-test
 bool    debug_buttons             = false; // true=serieel button-test
 bool    debug_msgcsv              = false; // true=serieel csv-formaat
 bool    debug_wifi                = false; // true=serieel wifi-test
+
 bool    send_msg                  = true;  // true=send mails (gewoon + alert)
+bool    wifimanager_reset         = false; // true=reset wifimanager
+int     wifimanager_quality       = 10;    // %sterkte wifinetwerken
 String  versie                    = "5.0"; // versienummer
 int     lcdBaud                   = 115200;// LCD baudrate
 
@@ -93,7 +96,7 @@ DallasTemperature sensors(&oneWire);
 DHT dht(DHT_PIN, DHT_TYPE);
 WiFiManager wifiManager;
 
-void setup(void) {
+void setup(void) { 
   // Initialseer LCD,Serieel en Serieel-message
   lcd_serial_msg_Init();
 
@@ -169,11 +172,6 @@ void getfrigoTempHumi() {
 void controlState() {
   currentMillis = millis();
   millisInControllerState = currentMillis - millisStateStart;
-  //Serial.print(currentControllerState);
-  //Serial.print(" : ");
-  //Serial.print(showTime(millisInControllerState/1000,false));
-  //Serial.print(" : ");
-  //Serial.println(DateFormatter::format("%d/%m/%Y %H:%M:%S", DateTime.now()));
   switch ( currentControllerState ) {
     // Momenteel aan het KOELEN
     case STATE_COOLING:
@@ -186,6 +184,7 @@ void controlState() {
         }
         millisStateStart = currentMillis;
         digitalWrite(COOLING_PIN, LOW);
+        if ( send_msg ) {sendStateMessage();}
       } else {
         // Alert-message als er iets grondig fout loopt
         if ( send_msg && millisInControllerState > STATE_DANGER ) {sendAlertMessage();}
@@ -201,6 +200,7 @@ void controlState() {
         countStatHeat++;
         countStatHeatTotal++;
         digitalWrite(HEATING_PIN, HIGH);
+        if ( send_msg ) {sendStateMessage();}
       }
       else if (wortTemp > targetTemp + coolingThreshold) {
         if (debug_msgcsv) {serialMsgCsv();}
@@ -210,6 +210,7 @@ void controlState() {
         countStatCool++;
         countStatCoolTotal++;
         digitalWrite(COOLING_PIN, HIGH);
+        if ( send_msg ) {sendStateMessage();}
       }
       break;
     // Momenteel aan het VERWARMEN
@@ -223,6 +224,7 @@ void controlState() {
         }
         millisStateStart = currentMillis;
         digitalWrite(HEATING_PIN, LOW);
+        if ( send_msg ) {sendStateMessage();}
       } else {
         // Alert-message als er iets grondig fout loopt
         if ( send_msg && millisInControllerState > 900000 ) {sendAlertMessage();}
@@ -274,9 +276,9 @@ void getTilt() {
 void sendMessage() {
   currentMillis = millis();
   if ( currentMillis - millisElapsedMessages > millisMessage) {
-    if (wifiSuccess) {
+    if (WiFiConnected()) {
       millisElapsedMessages = currentMillis;
-      String subject      = "Gist Controller " + versie;
+      String subject      = "Gist Controller " + versie + " Doel:" + targetTemp;
       String message      = "";
       message = fillMessage();
       mailSend = sendMail(subject,message);
@@ -289,14 +291,25 @@ void sendMessage() {
   }
 }
 /*
+ * Stuur bericht bij statuswissel
+ */
+void sendStateMessage() {
+  if (WiFiConnected()) {
+    String subject      = "Status Gist Controller " + versie + " Doel:" + targetTemp;
+    String message      = "";
+    message = fillStateMessage();
+    mailSend = sendMail(subject,message);
+    }
+}
+/*
  * Stuur een Alertmessage
  */
 void sendAlertMessage() {
   --alertMaxTimer;
   if ( alertMaxTimer < 1) {
-    if (wifiSuccess) {
+    if (WiFiConnected()) {
       alertMaxTimer=alertCountDown;
-      String subject      = "ALERT Gist Controller " + versie;
+      String subject      = "ALERT Gist Controller " + versie + " Doel:" + targetTemp;
       String message      = "";
       message = fillAlertMessage();
       mailSend = sendMail(subject,message);
@@ -331,14 +344,12 @@ void controlDisplayState() {
   else if ( whichButtonPressed == BUTTON_RIGHT || 
             whichButtonPressed == BUTTON_LEFT ) {
     handleLeftRight( whichButtonPressed, currentMillis );
-    enableBacklight(currentMillis);
     displayState();
   }
   // Knoppen UP/DOWN = wijzig parameters (welke = afhankelijk van de LCD-status)
   else if ( whichButtonPressed == BUTTON_UP || 
             whichButtonPressed == BUTTON_DOWN ) {
     handleUpDown( whichButtonPressed, currentMillis );
-    enableBacklight(currentMillis);
     displayState(); 
   }
   else if ( whichButtonPressed == BUTTON_SELECT ) {
@@ -360,6 +371,7 @@ void checkBacklightTimeout(int mtime) {
  * disable LCDscherm
  */
 void disableBacklight(int mtime) {
+  currentLCDState = DISPLAY_SUMMARY;
   lcd.noBacklight();
   lcd.noDisplay();
   isBacklightActive = false;
@@ -471,10 +483,17 @@ void handleUpDown( int whichButtonPressed, int mtime ) {
  * Knop = SELECT = LCDscherm aan/uit
  */
 void handleSelect(int mtime) {
+  switch ( currentLCDState ) {
+    case DISPLAY_IP:
+      if ( send_msg ) {
+        wifiSuccess=WiFiConnect();
+        break;
+      }
+  }
   if (isBacklightActive) {disableBacklight(mtime);}
   else {enableBacklight(mtime);}
 }
-
+  
 /*
  * Welke knop werd er gedrukt?
  */
@@ -551,20 +570,10 @@ boolean initComponents() {
   dht.begin();                             // DHT11
 
   // Initialiseer wifi als send_msg = true
-  if (send_msg) {
-    lcdShowInit("WiFi...........",0);
-    //wifiManager.setDebugOutput(false);
-    wifiManager.setMinimumSignalQuality(10);
-    //Eerste parameter = naam accesspoint
-    //Tweede parameter = paswoord
-    wifiSuccess=wifiManager.autoConnect("AutoConnectAP", "gistcontroller");
-    if(!wifiSuccess) {
-      ESP.restart();
-    } else {
-      lcdShowInit("................",0);
-      lcdShowInit(WiFi.localIP().toString().c_str(),0);
-    }
-  }
+  if ( send_msg ) {
+    wifiSuccess=WiFiConnect();
+    if(!wifiSuccess) {return false;}
+  } 
 
   // test DHT11
   lcdShowInit("DHT11..........",0);
@@ -602,6 +611,38 @@ boolean initComponents() {
   backlightStart = millis();
   millisElapsedMessages = millis();
   return true;
+}
+
+/*
+ * Connecteer met WiFi
+ */
+boolean WiFiConnect() {
+  lcdShowInit("WiFi...........",0);  
+  if ( wifimanager_reset ) {wifiManager.resetSettings();}
+  //wifiManager.setDebugOutput(false);
+  wifiManager.setMinimumSignalQuality(wifimanager_quality);
+  //Eerste parameter = naam accesspoint
+  //Tweede parameter = paswoord
+  wifiSuccess=wifiManager.autoConnect("GistController", "gistcontroller");
+  if(!wifiSuccess) {
+      ESP.restart();
+  } else {
+    lcdShowInit(WiFi.localIP().toString().c_str(),0);
+    delay(2000);
+    return true;
+  } 
+}
+
+/*
+ * WiFi nog connectie
+ */
+boolean WiFiConnected() {
+  boolean state       = true;
+
+  if (WiFi.status() != WL_CONNECTED) {state = false;}
+  if (WiFi.localIP().toString() == "0.0.0.0") {state = false;}
+
+  return state;
 }
 
 /*
@@ -665,9 +706,10 @@ void lcd_serial_msg_Init() {
 
   if (debug_msgcsv) {
     Serial.print("startpunt;meetpunt;status;tijdinstatus;");
-    Serial.print("worttemp;frigotemp;vochtigheid;coolingsinframe;");
+    Serial.print("doel;worttemp;frigotemp;vochtigheid;coolingsinframe;");
     Serial.println("heatingsinframe;tiltsinframe;tijdtussentilts");
   }
+  
 }
 
 /*
@@ -900,9 +942,8 @@ void displayIP() {
   lcd.setCursor(0,0);
   lcd.print("IP:");
   lcd.setCursor(0,1);
-  if (wifiSuccess) {
-    lcd.print(WiFi.localIP().toString().c_str());
-  }
+  lcd.print(WiFi.localIP().toString().c_str());
+
 }
 
 /**
@@ -945,9 +986,7 @@ String zeroPad( int value ) {
 String fillMessage() {
   String bmsg       = "";
 
-  if (wifiSuccess) {
-    bmsg = bmsg + WiFi.localIP().toString().c_str();
-  }
+  bmsg = bmsg + WiFi.localIP().toString().c_str() + "<BR>";
   bmsg = bmsg + DateFormatter::format("Startpunt: %d/%m/%Y %H:%M:%S", startDateInt);
   bmsg = bmsg + DateFormatter::format(" Meetpunt: %d/%m/%Y %H:%M:%S", DateTime.now());
   bmsg += "<p>";
@@ -993,14 +1032,43 @@ String fillMessage() {
 }
 
 /*
+ * Message bij statusupdate: cool/heat
+ */
+String fillStateMessage() {
+  String bmsg       = "";
+
+  bmsg = bmsg + WiFi.localIP().toString().c_str() + "<BR>";
+  bmsg = bmsg + DateFormatter::format("Startpunt: %d/%m/%Y %H:%M:%S", startDateInt);
+  bmsg = bmsg + DateFormatter::format(" Meetpunt: %d/%m/%Y %H:%M:%S", DateTime.now());
+  bmsg += "<p>";
+            
+  bmsg += "Naar ";
+  switch ( currentControllerState ) {
+    case STATE_COOLING:
+      bmsg = bmsg + "Koelen";
+      break;
+    case STATE_INACTIVE:
+      bmsg = bmsg + "Inactief";
+      break;
+    case STATE_HEATING:
+      bmsg = bmsg + "Verwarmen";
+      break;
+  }
+  bmsg = bmsg + "--> Wort temperatuur: " + wortTemp;
+  bmsg = bmsg + " Frigo temperatuur: " + frigoTemp;
+  bmsg = bmsg + " vochtigheid: " + frigoHumi;
+  bmsg += "<p>";
+   
+  return bmsg;
+}
+
+/*
  * vul string met Alertinformatie om te verzenden
  * <BR> = nieuwe lijn <p> = nieuwe paragraaf
  */
 String fillAlertMessage() {  
   String bmsg       = "";
-  if (wifiSuccess) {
-    bmsg = bmsg + WiFi.localIP().toString().c_str();
-  }
+  bmsg = bmsg + WiFi.localIP().toString().c_str() + "<BR>";
   bmsg = bmsg + DateFormatter::format("Startpunt: %d/%m/%Y %H:%M:%S", startDateInt);
   bmsg = bmsg + DateFormatter::format(" Meetpunt: %d/%m/%Y %H:%M:%S", DateTime.now());
   bmsg += "<p>";
@@ -1048,6 +1116,9 @@ void serialMsgCsv() {
   Serial.print(";");
   // tijd in huidige status
   Serial.print(showTime(millisInControllerState/1000,false));
+  Serial.print(";");
+  // doeltemperatuur
+  Serial.print(targetTemp);
   Serial.print(";");
   // huidige worttemp
   Serial.print(wortTemp);

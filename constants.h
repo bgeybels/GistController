@@ -10,7 +10,7 @@ const float TEMP_THRESHOLD_INCR   = 0.25;  // Tel bij threashold UP/DOWN
 const int   TEMP_DANGER           = 1;     // temp +- thres + danger = ALERT
 const float MINIMUM_THRESHOLD     = 0.1;   // Minimum toegelaten MIN-THREASH
 const float MAXIMUM_THRESHOLD     = 5.0;   // Maximum toegelaten MAX-THREASH
-const int   REDIRECT_TIMEOUT      = 10000;  // Terug naar hoofdscherm *5=Timeout (millis)
+const int   REDIRECT_TIMEOUT      = 15000; // Terug naar hoofdscherm *5=Timeout (millis)
 const int   BETWEEN_MSG_INCR      = 10;    // Tel bij targettimebetweenmsg (minuten)
 
 // Pins in gebruik
