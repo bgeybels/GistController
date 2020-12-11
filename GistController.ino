@@ -31,9 +31,9 @@ bool    debug_msgcsv              = false; // true=serieel csv-formaat
 bool    debug_wifi                = false; // true=serieel wifi-test
 
 bool    send_msg                  = true;  // true=send mails (gewoon + alert)
-bool    wifimanager_reset         = false; // true=reset wifimanager
-int     wifimanager_quality       = 10;    // %sterkte wifinetwerken
-String  versie                    = "5.0"; // versienummer
+bool    wm_reset                  = false; // true=reset wifimanager
+int     wm_quality                = 10;    // %sterkte wifinetwerken
+String  versie                    = "5.2"; // versienummer
 int     lcdBaud                   = 115200;// LCD baudrate
 
 // 3600000=1h 1800000=30min 600000=10min 60000=1min
@@ -50,8 +50,8 @@ float   wortTemp                  = 0;     // Huidige temperatuur
 float   frigoTemp                 = 0;     // temp Frigo
 float   frigoHumi                 = 0;     // vochtigheid
 float   targetTemp                = 21.0;  // Te handhaven temperatuur
-float   coolingThreshold          = 1.0;   // Uitstelwaaarde voor koeling start
-float   heatingThreshold          = 1.0;   // Uitstelwaarde voor verwarmen start
+float   coolingThreshold          = 0.5;   // Uitstelwaaarde voor koeling start
+float   heatingThreshold          = 0.5;   // Uitstelwaarde voor verwarmen start
 float   maxWortTemp               = 0;     // hoogste temperatuur die bereikt werd
 float   minWortTemp               = 0;     // laagste temperatuur die bereikt werd
 int     maxTimeHeating            = 0;     // langste tijd status VERWARMEN (millis)
@@ -114,10 +114,6 @@ void setup(void) {
   if ( send_msg ) {sendInitMessage();}
 }
 
-/**
- * Temperatuur + statusupdate = +-elke seconde
- * LCD en knoppen             = +-elke 0.1 seconde
- */
 void loop(void) {
   updateTemperature();                      // Haal de huidige temperatuur op
   controlState();                           // Update status: koel,inactief,verwarm
@@ -177,7 +173,7 @@ void controlState() {
     // Momenteel aan het KOELEN
     case STATE_COOLING:
       if (wortTemp < targetTemp + coolingThreshold) {
-        if (debug_msgcsv) {serialMsgCsv();}
+        if (debug_msgcsv) {serialMsgCsv("StartInactief");}
         //stop KOELEN + zet INACTIEF
         currentControllerState = STATE_INACTIVE;
         if (millisInControllerState > maxTimeCooling) {
@@ -194,7 +190,7 @@ void controlState() {
     // Momenteel INACTIEF = niks aan het doen
     case STATE_INACTIVE:
       if (wortTemp < targetTemp - heatingThreshold) {
-        if (debug_msgcsv) {serialMsgCsv();}
+        if (debug_msgcsv) {serialMsgCsv("StartWarmen");}
         //start VERWARMEN
         currentControllerState = STATE_HEATING;
         millisStateStart = currentMillis;
@@ -204,7 +200,7 @@ void controlState() {
         if ( send_msg ) {sendStateMessage();}
       }
       else if (wortTemp > targetTemp + coolingThreshold) {
-        if (debug_msgcsv) {serialMsgCsv();}
+        if (debug_msgcsv) {serialMsgCsv("StartKoelen");}
         //start KOELEN
         currentControllerState = STATE_COOLING;
         millisStateStart = currentMillis;
@@ -217,7 +213,7 @@ void controlState() {
     // Momenteel aan het VERWARMEN
     case STATE_HEATING:
       if (wortTemp > targetTemp - heatingThreshold) {
-        if (debug_msgcsv) {serialMsgCsv();}
+        if (debug_msgcsv) {serialMsgCsv("StartInactief");}
         //stop VERWARMEN
         currentControllerState = STATE_INACTIVE;
         if (millisInControllerState > maxTimeHeating) {
@@ -630,9 +626,9 @@ boolean initComponents() {
  */
 boolean WiFiConnect() {
   lcdShowInit("WiFi...........",0);  
-  if ( wifimanager_reset ) {wifiManager.resetSettings();}
+  if ( wm_reset ) {wifiManager.resetSettings();}
   //wifiManager.setDebugOutput(false);
-  wifiManager.setMinimumSignalQuality(wifimanager_quality);
+  wifiManager.setMinimumSignalQuality(wm_quality);
   //Eerste parameter = naam accesspoint
   //Tweede parameter = paswoord
   wifiSuccess=wifiManager.autoConnect("GistController", "gistcontroller");
@@ -717,7 +713,7 @@ void lcd_serial_msg_Init() {
   delay(1000);
 
   if (debug_msgcsv) {
-    Serial.print("startpunt;meetpunt;status;tijdinstatus;");
+    Serial.print("startpunt;meetpunt;currentstatus;tijdinstatus;newstatus");
     Serial.print("doel;worttemp;frigotemp;vochtigheid;coolingsinframe;");
     Serial.println("heatingsinframe;tiltsinframe;tijdtussentilts");
   }
@@ -1106,7 +1102,7 @@ String fillAlertMessage() {
   return bmsg;
 }
 
-void serialMsgCsv() {
+void serialMsgCsv(String newstate ) {
   // startdatum
   Serial.print(DateFormatter::format("%d/%m/%Y %H:%M:%S", startDateInt));
   Serial.print(";");
@@ -1128,6 +1124,9 @@ void serialMsgCsv() {
   Serial.print(";");
   // tijd in huidige status
   Serial.print(showTime(millisInControllerState/1000,false));
+  Serial.print(";");
+  // nieuwe status
+  Serial.print(newstate);
   Serial.print(";");
   // doeltemperatuur
   Serial.print(targetTemp);
